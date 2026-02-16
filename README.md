@@ -8,9 +8,9 @@ Sustav za praćenje budžeta Rotary Distrikta 1913 Croatia (1.7.2026 - 30.6.2027
 1. Preuzmite `rotary-budget-tracker.html`
 2. Otvorite u web browseru
 3. Prijavite se:
-   - **Admin**: admin@rotary1913.org / admin123
-   - **Editor**: editor@rotary1913.org / editor123
-   - **Viewer**: viewer@rotary1913.org / viewer123
+   - **Admin**: 
+   - **Editor**: 
+   - **Viewer**: 
 
 ### GitHub Pages Deployment:
 
