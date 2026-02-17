@@ -879,12 +879,12 @@
 
             showLoading(true);
             try {
-                const { data: userData } = await sb
+                const { data: userData, error } = await sb
                     .from('users')
                     .select('*')
                     .eq('email', email)
                     .eq('password_hash', password)
-                    .single();
+                    .maybeSingle();
 
                 if (userData) {
                     currentUser = userData;
@@ -896,7 +896,8 @@
                 }
             } catch (err) {
                 showLoading(false);
-                alert('Neispravno korisničko ime ili lozinka');
+                console.error('Login error:', err);
+                alert('Greška pri prijavi. Pokušajte ponovo.');
             }
         });
 
