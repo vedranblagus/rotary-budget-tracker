@@ -6,6 +6,7 @@
     <title>Rotary District 1913 - Budget Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         .hidden { display: none; }
@@ -194,7 +195,7 @@
                         Budžet
                     </button>
                     <button data-tab="upload" class="nav-tab px-6 py-3 font-medium transition-colors text-gray-600 hover:text-rotary-gold hidden" id="upload-tab">
-                        Upload CSV
+                        Upload XLS/CSV
                     </button>
                     <button data-tab="realizirano" class="nav-tab px-6 py-3 font-medium transition-colors text-gray-600 hover:text-rotary-gold hidden" id="realizirano-tab">
                         Realizirano
@@ -399,25 +400,70 @@
             <!-- Upload CSV Tab -->
             <div id="tab-upload" class="tab-content hidden">
                 <div class="bg-white rounded-2xl shadow-lg p-6 border-t-0 border-rotary-gold">
-                    <h2 class="text-xl font-semibold mb-6 text-rotary-blue">Upload bankovnog izvoda (CSV)</h2>
+                    <h2 class="text-xl font-semibold mb-6 text-rotary-blue">📂 Upload bankovnog izvoda (XLS/CSV)</h2>
                     
                     <div class="border-2 border-dashed border-rotary-gold rounded-2xl p-12 text-center bg-rotary-gold-light">
                         <svg class="mx-auto mb-4 text-rotary-gold" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
                         </svg>
-                        <p class="text-gray-600 mb-4 font-medium">Kliknite za odabir CSV datoteke</p>
-                        <input type="file" accept=".csv" id="csv-upload" class="hidden" />
+                        <p class="text-gray-600 mb-2 font-medium">Kliknite za odabir datoteke</p>
+                        <p class="text-sm text-gray-500 mb-4">Podržani formati: <strong>.xls, .xlsx, .csv</strong></p>
+                        <input type="file" accept=".csv,.xls,.xlsx" id="csv-upload" class="hidden" />
                         <label for="csv-upload" class="inline-block rotary-gold hover:rotary-gold-dark text-white px-6 py-3 rounded-2xl cursor-pointer transition-colors font-semibold shadow-lg">
-                            Odaberi datoteku
+                            📁 Odaberi datoteku
                         </label>
                     </div>
 
+                    <!-- Upload progress -->
+                    <div id="upload-progress" class="hidden mt-6 p-4 bg-blue-50 rounded-2xl border border-blue-200">
+                        <div class="flex items-center gap-3">
+                            <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                            <span id="upload-progress-text" class="text-blue-700 font-medium">Obrađujem datoteku...</span>
+                        </div>
+                    </div>
+
+                    <!-- Upload results -->
+                    <div id="upload-results" class="hidden mt-6">
+                        <div class="p-4 bg-green-50 rounded-2xl border border-green-200 mb-4">
+                            <p id="upload-summary" class="font-semibold text-green-800"></p>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="bg-gray-100">
+                                        <th class="px-4 py-2 text-left">Datum</th>
+                                        <th class="px-4 py-2 text-left">Korisnik</th>
+                                        <th class="px-4 py-2 text-left">Opis</th>
+                                        <th class="px-4 py-2 text-right">Iznos</th>
+                                        <th class="px-4 py-2 text-center">Tip</th>
+                                        <th class="px-4 py-2 text-left">Kategorija</th>
+                                        <th class="px-4 py-2 text-center">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="upload-preview-tbody"></tbody>
+                            </table>
+                        </div>
+                        <div class="mt-4 flex gap-3">
+                            <button id="confirm-upload-btn" class="rotary-gold text-white px-6 py-3 rounded-2xl font-semibold shadow-lg">
+                                ✅ Spremi transakcije
+                            </button>
+                            <button id="cancel-upload-btn" class="bg-gray-200 text-gray-700 px-6 py-3 rounded-2xl font-semibold">
+                                ✕ Odustani
+                            </button>
+                        </div>
+                    </div>
+
                     <div class="mt-6 p-4 bg-blue-50 rounded-2xl border border-blue-200">
-                        <h4 class="font-semibold mb-2 text-rotary-blue">Format CSV datoteke:</h4>
-                        <p class="text-sm text-gray-700">CSV datoteka mora sadržavati sljedeće stupce:</p>
-                        <code class="block mt-2 p-2 bg-white rounded text-sm border">Datum, Opis, Iznos, Saldo</code>
-                        <p class="text-xs text-gray-600 mt-2">Primjer: 01.07.2026, Uplata članarine - J. Horvat, 150.00, 10500.00</p>
-                        <p class="text-xs text-gray-600 mt-2"><strong>Napomena:</strong> Pozitivni iznosi = prihodi, negativni iznosi = rashodi</p>
+                        <h4 class="font-semibold mb-2 text-rotary-blue">Format HPB izvoda:</h4>
+                        <p class="text-sm text-gray-700">Aplikacija automatski čita HPB format:</p>
+                        <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-600">
+                            <div>📅 <strong>Stupac A</strong> - Datum</div>
+                            <div>👤 <strong>Stupac C</strong> - Korisnik</div>
+                            <div>📝 <strong>Stupac D</strong> - Opis</div>
+                            <div>💸 <strong>Stupac E</strong> - Isplate (troškovi)</div>
+                            <div>💰 <strong>Stupac F</strong> - Uplate (prihodi)</div>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-2">⚠️ Već uvezene transakcije neće biti duplicirane</p>
                     </div>
                 </div>
             </div>
@@ -1211,100 +1257,248 @@
             });
         }
 
-        // CSV Upload
+        // XLS/CSV Upload - HPB format
+        let pendingUploadTransactions = [];
+
+        // Helper: parse Excel date serial to DD.MM.YYYY
+        function excelDateToString(serial) {
+            if (!serial) return '';
+            if (typeof serial === 'string' && serial.includes('.')) return serial.trim();
+            // Excel date serial
+            const utc_days = Math.floor(serial - 25569);
+            const utc_value = utc_days * 86400;
+            const date = new Date(utc_value * 1000);
+            const d = String(date.getUTCDate()).padStart(2, '0');
+            const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+            const y = date.getUTCFullYear();
+            return `${d}.${m}.${y}`;
+        }
+
+        // Helper: extract month label from DD.MM.YYYY
+        function dateToMonth(dateStr) {
+            if (!dateStr) return '';
+            const parts = dateStr.split('.');
+            if (parts.length < 2) return dateStr;
+            const months = ['SIJ','VEL','OŽU','TRA','SVI','LIP','SRP','KOL','RUJ','LIS','STU','PRO'];
+            const m = parseInt(parts[1]) - 1;
+            return months[m] || dateStr;
+        }
+
         document.getElementById('csv-upload').addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
 
-            const text = await file.text();
-            const lines = text.trim().split('\n');
-            const newTransactions = [];
+            const progress = document.getElementById('upload-progress');
+            const progressText = document.getElementById('upload-progress-text');
+            const results = document.getElementById('upload-results');
 
-            for (let i = 1; i < lines.length; i++) {
-                const line = lines[i].trim();
-                if (!line) continue;
+            progress.classList.remove('hidden');
+            results.classList.add('hidden');
+            progressText.textContent = 'Čitam datoteku...';
 
-                const parts = line.split(',').map(p => p.trim().replace(/^"|"$/g, ''));
-                if (parts.length >= 3) {
-                    const amount = parseFloat(parts[2]) || 0;
-                    const date = parts[0];
-                    const description = parts[1];
-                    
-                    // Check if this transaction already exists (by date, description, and amount)
-                    const existingTransaction = transactions.find(t => 
-                        t.date === date && 
-                        t.description === description && 
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+                progressText.textContent = `Pronađeno ${rows.length} redaka. Filtriram transakcije...`;
+
+                const newTransactions = [];
+                const skippedDuplicates = [];
+
+                for (let i = 0; i < rows.length; i++) {
+                    const row = rows[i];
+                    if (!row || row.length < 5) continue;
+
+                    // Column A = date, C = user, D = description, E = expense, F = income
+                    const rawDate = row[0];
+                    const user = String(row[2] || '').trim();
+                    const desc = String(row[3] || '').trim();
+                    const expenseVal = parseFloat(String(row[4]).replace(',', '.')) || 0;
+                    const incomeVal = parseFloat(String(row[5]).replace(',', '.')) || 0;
+
+                    // Skip header rows and empty rows
+                    if (!rawDate || (!expenseVal && !incomeVal)) continue;
+                    const dateStr = excelDateToString(rawDate);
+                    if (!dateStr.match(/\d{1,2}\.\d{1,2}\.\d{4}/)) continue;
+
+                    const amount = incomeVal > 0 ? incomeVal : -expenseVal;
+                    const type = incomeVal > 0 ? 'income' : 'expense';
+                    const fullDesc = [user, desc].filter(Boolean).join(' - ');
+                    const month = dateToMonth(dateStr);
+
+                    // Check duplicate: same date + same description + same amount
+                    const isDuplicate = transactions.some(t =>
+                        t.date === dateStr &&
+                        t.description === fullDesc &&
                         Math.abs(t.amount - amount) < 0.01
                     );
-                    
-                    // Skip if already exists
-                    if (existingTransaction) {
+
+                    if (isDuplicate) {
+                        skippedDuplicates.push(dateStr);
                         continue;
                     }
-                    
+
                     newTransactions.push({
-                        id: Date.now() + i + Math.random(),
-                        date: date,
-                        description: description,
-                        amount: amount,
+                        id: `upload-${Date.now()}-${i}-${Math.random().toString(36).substr(2,5)}`,
+                        date: dateStr,
+                        month: month,
+                        description: fullDesc,
+                        user: user,
+                        type: type,
                         category: '',
-                        type: amount > 0 ? 'income' : 'expense'
+                        amount: amount,
+                        source: 'xls'
                     });
                 }
-            }
 
-            if (newTransactions.length === 0) {
-                alert('Sve transakcije iz CSV-a već postoje u sustavu. Nema novih zapisa za dodati.');
-                return;
-            }
-
-            alert(`Pronađeno ${newTransactions.length} novih transakcija (${transactions.length} već postoji). Započinjem AI kategorizaciju...`);
-
-            for (const trans of newTransactions) {
-                const categories = trans.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
-                try {
-                    const response = await fetch("https://api.anthropic.com/v1/messages", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            model: "claude-sonnet-4-20250514",
-                            max_tokens: 1000,
-                            messages: [{
-                                role: "user",
-                                content: `Analiziraj bankovnu transakciju i vrati SAMO broj kategorije (1-${categories.length}):\n\nTransakcija: ${trans.description}\nIznos: ${trans.amount} EUR\n\nKategorije:\n${categories.map((c, i) => `${i+1}. ${c}`).join('\n')}`
-                            }]
-                        })
-                    });
-                    const data = await response.json();
-                    const idx = parseInt(data.content[0].text.trim()) - 1;
-                    trans.category = categories[idx] || categories[0];
-                } catch {
-                    trans.category = categories[0];
+                if (newTransactions.length === 0) {
+                    progress.classList.add('hidden');
+                    alert(`Nema novih transakcija!\n\n${skippedDuplicates.length} transakcija je već u sustavu.`);
+                    e.target.value = '';
+                    return;
                 }
+
+                // AI kategorization
+                progressText.textContent = `AI kategorizacija ${newTransactions.length} transakcija...`;
+
+                for (let i = 0; i < newTransactions.length; i++) {
+                    const trans = newTransactions[i];
+                    progressText.textContent = `AI kategorizacija ${i+1}/${newTransactions.length}: ${trans.description.substring(0,30)}...`;
+                    const categories = trans.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+                    try {
+                        const response = await fetch("https://api.anthropic.com/v1/messages", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                model: "claude-sonnet-4-20250514",
+                                max_tokens: 100,
+                                messages: [{
+                                    role: "user",
+                                    content: `Kategoriziraj bankovnu transakciju Rotary Distrikta. Vrati SAMO broj kategorije (1-${categories.length}).\n\nTransakcija: ${trans.description}\nIznos: ${Math.abs(trans.amount)} EUR\nTip: ${trans.type === 'income' ? 'Prihod' : 'Trošak'}\n\nKategorije:\n${categories.map((c, i) => `${i+1}. ${c}`).join('\n')}`
+                                }]
+                            })
+                        });
+                        const data = await response.json();
+                        const idx = parseInt(data.content[0].text.trim()) - 1;
+                        trans.category = categories[Math.max(0, Math.min(idx, categories.length-1))] || categories[0];
+                    } catch {
+                        trans.category = categories[0];
+                    }
+                }
+
+                pendingUploadTransactions = newTransactions;
+
+                // Show preview table
+                const tbody = document.getElementById('upload-preview-tbody');
+                tbody.innerHTML = '';
+                newTransactions.forEach((t, idx) => {
+                    const categories = t.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+                    tbody.innerHTML += `
+                        <tr class="border-b hover:bg-gray-50 ${t.type === 'income' ? 'bg-green-50' : 'bg-red-50'}">
+                            <td class="px-4 py-2 text-sm">${t.date}<br><span class="text-xs text-gray-500">${t.month}</span></td>
+                            <td class="px-4 py-2 text-sm max-w-24 truncate">${t.user || '—'}</td>
+                            <td class="px-4 py-2 text-sm max-w-32 truncate" title="${t.description}">${t.description}</td>
+                            <td class="px-4 py-2 text-right font-medium ${t.type === 'income' ? 'text-green-700' : 'text-red-700'}">
+                                ${t.type === 'income' ? '+' : '-'}€${Math.abs(t.amount).toLocaleString('hr-HR', {minimumFractionDigits:2})}
+                            </td>
+                            <td class="px-4 py-2 text-center">
+                                <select data-idx="${idx}" class="pending-type-select border rounded px-1 py-1 text-xs">
+                                    <option value="income" ${t.type === 'income' ? 'selected' : ''}>📈 Prihod</option>
+                                    <option value="expense" ${t.type === 'expense' ? 'selected' : ''}>📉 Trošak</option>
+                                </select>
+                            </td>
+                            <td class="px-4 py-2">
+                                <select data-idx="${idx}" class="pending-cat-select border rounded px-1 py-1 text-xs w-full">
+                                    <option value="">Odaberi...</option>
+                                    ${categories.map(c => `<option value="${c}" ${c === t.category ? 'selected' : ''}>${c}</option>`).join('')}
+                                </select>
+                            </td>
+                            <td class="px-4 py-2 text-center">
+                                <span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">Nova</span>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                // Event listeners for type change - update category options
+                document.querySelectorAll('.pending-type-select').forEach(sel => {
+                    sel.addEventListener('change', (e) => {
+                        const idx = parseInt(e.target.dataset.idx);
+                        pendingUploadTransactions[idx].type = e.target.value;
+                        const catSel = document.querySelector(`.pending-cat-select[data-idx="${idx}"]`);
+                        const cats = e.target.value === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+                        catSel.innerHTML = '<option value="">Odaberi...</option>' + cats.map(c => `<option value="${c}">${c}</option>`).join('');
+                    });
+                });
+
+                document.querySelectorAll('.pending-cat-select').forEach(sel => {
+                    sel.addEventListener('change', (e) => {
+                        const idx = parseInt(e.target.dataset.idx);
+                        pendingUploadTransactions[idx].category = e.target.value;
+                    });
+                });
+
+                document.getElementById('upload-summary').textContent =
+                    `✅ Pronađeno ${newTransactions.length} novih transakcija | ⏭️ Preskočeno ${skippedDuplicates.length} duplikata. Pregledan i potvrdi kategorije, zatim klikni "Spremi transakcije".`;
+
+                progress.classList.add('hidden');
+                results.classList.remove('hidden');
+
+            } catch (err) {
+                progress.classList.add('hidden');
+                console.error('Upload error:', err);
+                alert('Greška pri čitanju datoteke: ' + err.message);
             }
 
-            transactions = [...transactions, ...newTransactions];
-            
-            // Bulk insert to Supabase
-            showLoading(true);
-            const insertRows = newTransactions.map(t => ({
-                id: String(t.id),
-                date: t.date,
-                description: t.description,
-                type: t.type,
-                category: t.category,
-                amount: t.amount,
-                source: 'csv'
-            }));
-            await sb.from('transactions').insert(insertRows);
-            showLoading(false);
-            
-            alert(`Kategorizacija završena! Dodano ${newTransactions.length} novih transakcija.`);
-            renderTransactions();
-            renderRealizirano();
-            renderDashboard();
+            e.target.value = ''; // Reset file input
+        });
 
-            document.querySelectorAll('.nav-tab')[4].click();
+        // Confirm upload button
+        document.addEventListener('DOMContentLoaded', () => {
+            const confirmBtn = document.getElementById('confirm-upload-btn');
+            if (confirmBtn) confirmBtn.addEventListener('click', async () => {
+                if (pendingUploadTransactions.length === 0) return;
+
+                showLoading(true);
+                const insertRows = pendingUploadTransactions.map(t => ({
+                    id: t.id,
+                    date: t.date,
+                    description: t.description,
+                    type: t.type,
+                    category: t.category || '',
+                    amount: t.amount,
+                    source: 'xls'
+                }));
+
+                const { error } = await sb.from('transactions').insert(insertRows);
+                if (error) {
+                    showLoading(false);
+                    alert('Greška pri spremanju: ' + error.message);
+                    return;
+                }
+
+                transactions = [...transactions, ...pendingUploadTransactions];
+                pendingUploadTransactions = [];
+
+                document.getElementById('upload-results').classList.add('hidden');
+                showLoading(false);
+
+                renderTransactions();
+                renderRealizirano();
+                renderDashboard();
+
+                alert(`✅ Uspješno spremljeno ${insertRows.length} transakcija!`);
+                // Switch to transactions tab
+                document.querySelector('[data-tab="transactions"]').click();
+            });
+
+            const cancelBtn = document.getElementById('cancel-upload-btn');
+            if (cancelBtn) cancelBtn.addEventListener('click', () => {
+                pendingUploadTransactions = [];
+                document.getElementById('upload-results').classList.add('hidden');
+            });
         });
 
         // Render Dashboard
@@ -2213,6 +2407,7 @@
                         actual_payment: c.actualPayment
                     }, { onConflict: 'name' });
                     if (!error) savedCount++;
+                    else console.error('Club save error:', error);
                 }
                 updateMainBudgetFromClubs();
                 await saveData('rotary-budget', budgetData);
@@ -2222,9 +2417,9 @@
                     user_name: currentUser ? currentUser.name : 'System',
                     user_id: currentUser ? currentUser.id : null
                 });
-                // Reload fresh from DB to confirm
-                const { data: clubRows } = await sb.from('clubs').select('*');
-                if (clubRows) {
+                // Reload fresh from DB to confirm - only update if data returned
+                const { data: clubRows, error: clubError } = await sb.from('clubs').select('*');
+                if (clubRows && clubRows.length > 0) {
                     clubsData = {};
                     clubRows.forEach(c => {
                         clubsData[c.name] = {
@@ -2234,9 +2429,11 @@
                             actualPayment: parseFloat(c.actual_payment) || 0
                         };
                     });
+                } else if (clubError) {
+                    console.error('Club reload error:', clubError);
                 }
                 // Reload prihodi log
-                const { data: prihodiRows } = await sb.from('activity_logs').select('*').in('log_type', ['club_change', 'club_added', 'club_deleted']).order('created_at', { ascending: false }).limit(100);
+                const { data: prihodiRows } = await sb.from('activity_logs').select('*').in('log_type', ['club_change', 'club_added', 'club_deleted', 'income_change']).order('created_at', { ascending: false }).limit(100);
                 if (prihodiRows) {
                     prihodiLog = prihodiRows.map(r => ({
                         timestamp: new Date(r.created_at).toLocaleString('hr-HR'),
