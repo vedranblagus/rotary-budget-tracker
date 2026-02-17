@@ -677,7 +677,7 @@
         </div>
     </div>
 
-    <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+    <script>
         // Data
         const INCOME_CATEGORIES = [
             'Prihodi od članarina',
@@ -916,7 +916,7 @@
         }
 
         // ==========================================
-        // LOGIN
+        // FIX 1: LOGIN - ispravljen error handling
         // ==========================================
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -924,27 +924,33 @@
             const password = document.getElementById('login-password').value;
 
             showLoading(true);
-            try {
-                const { data: userData, error } = await sb
-                    .from('users')
-                    .select('*')
-                    .eq('email', email)
-                    .eq('password_hash', password)
-                    .maybeSingle();
 
-                if (userData) {
-                    currentUser = userData;
-                    await loadData();
-                    showApp();
-                } else {
-                    showLoading(false);
-                    alert('Neispravno korisničko ime ili lozinka');
-                }
-            } catch (err) {
+            // Dohvati korisnika iz baze
+            const { data: userData, error } = await sb
+                .from('users')
+                .select('*')
+                .eq('email', email)
+                .eq('password_hash', password)
+                .maybeSingle();
+
+            if (error) {
+                // Greška u komunikaciji s bazom
                 showLoading(false);
-                console.error('Login error:', err);
-                alert('Greška pri prijavi. Pokušajte ponovo.');
+                alert('Greška pri prijavi: ' + error.message);
+                return; // STOP - ne nastavljaj dalje
             }
+
+            if (!userData) {
+                // Korisnik nije pronađen ili pogrešna lozinka
+                showLoading(false);
+                alert('Neispravno korisničko ime ili lozinka');
+                return; // STOP - ne nastavljaj dalje
+            }
+
+            // Uspješna prijava
+            currentUser = userData;
+            await loadData();
+            showApp();
         });
 
         // Logout
@@ -1340,8 +1346,9 @@
                         continue;
                     }
 
+                    // Privremeni ID samo za UI - NE šalje se u bazu
                     newTransactions.push({
-                        id: `upload-${Date.now()}-${i}-${Math.random().toString(36).substr(2,5)}`,
+                        tempId: `temp-${Date.now()}-${i}`,
                         date: dateStr,
                         month: month,
                         description: fullDesc,
@@ -1455,15 +1462,18 @@
             e.target.value = ''; // Reset file input
         });
 
-        // Confirm upload button
+        // ==========================================
+        // FIX 2: CONFIRM UPLOAD - bez id-a, koristimo returned data
+        // ==========================================
         document.addEventListener('DOMContentLoaded', () => {
             const confirmBtn = document.getElementById('confirm-upload-btn');
             if (confirmBtn) confirmBtn.addEventListener('click', async () => {
                 if (pendingUploadTransactions.length === 0) return;
 
                 showLoading(true);
+
+                // NE šaljemo id - Supabase će auto-generirati UUID
                 const insertRows = pendingUploadTransactions.map(t => ({
-                    id: t.id,
                     date: t.date,
                     description: t.description,
                     type: t.type,
@@ -1472,14 +1482,25 @@
                     source: 'xls'
                 }));
 
-                const { error } = await sb.from('transactions').insert(insertRows);
+                const { data: inserted, error } = await sb.from('transactions').insert(insertRows).select();
                 if (error) {
                     showLoading(false);
                     alert('Greška pri spremanju: ' + error.message);
                     return;
                 }
 
-                transactions = [...transactions, ...pendingUploadTransactions];
+                // Koristimo podatke koje je vratio Supabase (s pravim UUID-ovima)
+                const savedTransactions = inserted.map(t => ({
+                    id: t.id,
+                    date: t.date,
+                    description: t.description || '',
+                    type: t.type,
+                    category: t.category || '',
+                    amount: parseFloat(t.amount),
+                    source: t.source || 'xls'
+                }));
+
+                transactions = [...savedTransactions, ...transactions];
                 pendingUploadTransactions = [];
 
                 document.getElementById('upload-results').classList.add('hidden');
@@ -1559,12 +1580,7 @@
                     plugins: {
                         legend: {
                             position: 'bottom',
-                            labels: {
-                                padding: 15,
-                                font: {
-                                    size: 11
-                                }
-                            }
+                            labels: { padding: 15, font: { size: 11 } }
                         }
                     }
                 }
@@ -1593,12 +1609,7 @@
                     plugins: {
                         legend: {
                             position: 'bottom',
-                            labels: {
-                                padding: 15,
-                                font: {
-                                    size: 11
-                                }
-                            }
+                            labels: { padding: 15, font: { size: 11 } }
                         }
                     }
                 }
@@ -1612,68 +1623,44 @@
             const months = ['06', '07', '08', '09', '10', '11', '12', '01', '02', '03', '04', '05'];
             const monthNames = ['LIP', 'SRP', 'KOL', 'RUJ', 'LIS', 'STU', 'PRO', 'SIJ', 'VEL', 'OŽU', 'TRA', 'SVI'];
             
-            // Calculate monthly data
             const monthlyData = {};
-            
-            // Initialize structure
             [...INCOME_CATEGORIES, ...EXPENSE_CATEGORIES].forEach(cat => {
                 monthlyData[cat] = months.map(() => 0);
             });
 
-            // Process transactions
             transactions.forEach(trans => {
                 if (!trans.category) return;
-                
-                // Parse date (assuming DD.MM.YYYY format)
                 const dateParts = trans.date.split('.');
                 if (dateParts.length < 2) return;
-                
                 const month = dateParts[1];
                 const monthIndex = months.indexOf(month);
-                
                 if (monthIndex >= 0 && monthlyData[trans.category]) {
                     monthlyData[trans.category][monthIndex] += Math.abs(trans.amount);
                 }
             });
 
-            // Render table
             const tbody = document.getElementById('monthly-breakdown-body');
             tbody.innerHTML = '';
 
-            // Calculate cumulative totals for income
-            const incomeCumulative = months.map((m, idx) => {
-                return INCOME_CATEGORIES.reduce((sum, cat) => sum + monthlyData[cat][idx], 0);
-            });
+            const incomeCumulative = months.map((m, idx) => INCOME_CATEGORIES.reduce((sum, cat) => sum + monthlyData[cat][idx], 0));
             const incomeCumulativeRunning = [];
             let incomeRunningTotal = 0;
-            incomeCumulative.forEach(val => {
-                incomeRunningTotal += val;
-                incomeCumulativeRunning.push(incomeRunningTotal);
-            });
+            incomeCumulative.forEach(val => { incomeRunningTotal += val; incomeCumulativeRunning.push(incomeRunningTotal); });
 
-            // Cumulative Income Row
             tbody.innerHTML += `
                 <tr class="bg-gradient-to-r from-green-100 to-green-50 font-bold border-b-2 border-green-300">
                     <td class="px-4 py-3 text-sm sticky left-0 bg-green-100">UKUPNO PRIHODI (Kumulativ)</td>
-                    <td class="px-4 py-3 text-right">
-                        <div class="text-lg font-bold text-green-800">€${incomeRunningTotal.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
-                    </td>
-                    ${incomeCumulativeRunning.map(val => 
-                        `<td class="px-4 py-3 text-right">
-                            <div class="font-bold text-green-700">${val > 0 ? '€' + val.toLocaleString(undefined, {maximumFractionDigits: 0}) : '—'}</div>
-                        </td>`
-                    ).join('')}
+                    <td class="px-4 py-3 text-right"><div class="text-lg font-bold text-green-800">€${incomeRunningTotal.toLocaleString(undefined, {maximumFractionDigits: 0})}</div></td>
+                    ${incomeCumulativeRunning.map(val => `<td class="px-4 py-3 text-right"><div class="font-bold text-green-700">${val > 0 ? '€' + val.toLocaleString(undefined, {maximumFractionDigits: 0}) : '—'}</div></td>`).join('')}
                 </tr>
             `;
 
-            // Income rows
             tbody.innerHTML += '<tr class="bg-green-50"><td colspan="14" class="px-5 py-3 font-semibold text-green-900 sticky left-0 bg-green-50">PRIHODI</td></tr>';
             INCOME_CATEGORIES.forEach(cat => {
                 const budget = budgetData.income[cat] || 0;
                 const monthlyBudget = budget / 12;
                 const yearTotal = monthlyData[cat].reduce((sum, val) => sum + val, 0);
                 const yearPercent = budget > 0 ? (yearTotal / budget * 100) : 0;
-                
                 tbody.innerHTML += `
                     <tr class="hover:bg-gray-50 border-b">
                         <td class="px-4 py-3 text-sm sticky left-0 bg-white">${cat}</td>
@@ -1686,48 +1673,32 @@
                             const percent = monthlyBudget > 0 ? (val / monthlyBudget * 100) : 0;
                             return `<td class="px-4 py-3 text-right">
                                 <div class="font-semibold">${val > 0 ? '€' + val.toLocaleString(undefined, {maximumFractionDigits: 0}) : '—'}</div>
-                                ${val > 0 ? `<div class="text-xs text-gray-500">€${monthlyBudget.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
-                                <div class="text-xs font-semibold ${percent >= 100 ? 'text-green-600' : percent >= 50 ? 'text-yellow-600' : 'text-red-600'}">${percent.toFixed(0)}%</div>` : ''}
+                                ${val > 0 ? `<div class="text-xs text-gray-500">€${monthlyBudget.toLocaleString(undefined, {maximumFractionDigits: 0})}</div><div class="text-xs font-semibold ${percent >= 100 ? 'text-green-600' : percent >= 50 ? 'text-yellow-600' : 'text-red-600'}">${percent.toFixed(0)}%</div>` : ''}
                             </td>`;
                         }).join('')}
                     </tr>
                 `;
             });
 
-            // Calculate cumulative totals for expenses
-            const expenseCumulative = months.map((m, idx) => {
-                return EXPENSE_CATEGORIES.reduce((sum, cat) => sum + monthlyData[cat][idx], 0);
-            });
+            const expenseCumulative = months.map((m, idx) => EXPENSE_CATEGORIES.reduce((sum, cat) => sum + monthlyData[cat][idx], 0));
             const expenseCumulativeRunning = [];
             let expenseRunningTotal = 0;
-            expenseCumulative.forEach(val => {
-                expenseRunningTotal += val;
-                expenseCumulativeRunning.push(expenseRunningTotal);
-            });
+            expenseCumulative.forEach(val => { expenseRunningTotal += val; expenseCumulativeRunning.push(expenseRunningTotal); });
 
-            // Cumulative Expense Row
             tbody.innerHTML += `
                 <tr class="bg-gradient-to-r from-red-100 to-red-50 font-bold border-b-2 border-red-300">
                     <td class="px-4 py-3 text-sm sticky left-0 bg-red-100">UKUPNO RASHODI (Kumulativ)</td>
-                    <td class="px-4 py-3 text-right">
-                        <div class="text-lg font-bold text-red-800">€${expenseRunningTotal.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
-                    </td>
-                    ${expenseCumulativeRunning.map(val => 
-                        `<td class="px-4 py-3 text-right">
-                            <div class="font-bold text-red-700">${val > 0 ? '€' + val.toLocaleString(undefined, {maximumFractionDigits: 0}) : '—'}</div>
-                        </td>`
-                    ).join('')}
+                    <td class="px-4 py-3 text-right"><div class="text-lg font-bold text-red-800">€${expenseRunningTotal.toLocaleString(undefined, {maximumFractionDigits: 0})}</div></td>
+                    ${expenseCumulativeRunning.map(val => `<td class="px-4 py-3 text-right"><div class="font-bold text-red-700">${val > 0 ? '€' + val.toLocaleString(undefined, {maximumFractionDigits: 0}) : '—'}</div></td>`).join('')}
                 </tr>
             `;
 
-            // Expense rows
             tbody.innerHTML += '<tr class="bg-red-50"><td colspan="14" class="px-5 py-3 font-semibold text-red-900 sticky left-0 bg-red-50">RASHODI</td></tr>';
             EXPENSE_CATEGORIES.forEach(cat => {
                 const budget = budgetData.expenses[cat] || 0;
                 const monthlyBudget = budget / 12;
                 const yearTotal = monthlyData[cat].reduce((sum, val) => sum + val, 0);
                 const yearPercent = budget > 0 ? (yearTotal / budget * 100) : 0;
-                
                 tbody.innerHTML += `
                     <tr class="hover:bg-gray-50 border-b">
                         <td class="px-4 py-3 text-sm sticky left-0 bg-white">${cat}</td>
@@ -1740,29 +1711,20 @@
                             const percent = monthlyBudget > 0 ? (val / monthlyBudget * 100) : 0;
                             return `<td class="px-4 py-3 text-right">
                                 <div class="font-semibold">${val > 0 ? '€' + val.toLocaleString(undefined, {maximumFractionDigits: 0}) : '—'}</div>
-                                ${val > 0 ? `<div class="text-xs text-gray-500">€${monthlyBudget.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
-                                <div class="text-xs font-semibold ${percent >= 100 ? 'text-red-600' : percent >= 50 ? 'text-yellow-600' : 'text-green-600'}">${percent.toFixed(0)}%</div>` : ''}
+                                ${val > 0 ? `<div class="text-xs text-gray-500">€${monthlyBudget.toLocaleString(undefined, {maximumFractionDigits: 0})}</div><div class="text-xs font-semibold ${percent >= 100 ? 'text-red-600' : percent >= 50 ? 'text-yellow-600' : 'text-green-600'}">${percent.toFixed(0)}%</div>` : ''}
                             </td>`;
                         }).join('')}
                     </tr>
                 `;
             });
 
-            // SALDO (Income - Expenses) Cumulative Row
             const saldoCumulative = incomeCumulativeRunning.map((inc, idx) => inc - expenseCumulativeRunning[idx]);
             const finalSaldo = incomeRunningTotal - expenseRunningTotal;
-            
             tbody.innerHTML += `
                 <tr class="bg-gradient-to-r from-blue-100 to-blue-50 font-bold border-t-4 border-blue-400">
                     <td class="px-4 py-4 text-sm sticky left-0 bg-blue-100">SALDO (Kumulativ)</td>
-                    <td class="px-4 py-4 text-right">
-                        <div class="text-xl font-bold ${finalSaldo >= 0 ? 'text-green-700' : 'text-red-700'}">€${finalSaldo.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
-                    </td>
-                    ${saldoCumulative.map(val => 
-                        `<td class="px-4 py-4 text-right">
-                            <div class="font-bold ${val >= 0 ? 'text-green-700' : 'text-red-700'}">${val !== 0 ? '€' + val.toLocaleString(undefined, {maximumFractionDigits: 0}) : '—'}</div>
-                        </td>`
-                    ).join('')}
+                    <td class="px-4 py-4 text-right"><div class="text-xl font-bold ${finalSaldo >= 0 ? 'text-green-700' : 'text-red-700'}">€${finalSaldo.toLocaleString(undefined, {maximumFractionDigits: 0})}</div></td>
+                    ${saldoCumulative.map(val => `<td class="px-4 py-4 text-right"><div class="font-bold ${val >= 0 ? 'text-green-700' : 'text-red-700'}">${val !== 0 ? '€' + val.toLocaleString(undefined, {maximumFractionDigits: 0}) : '—'}</div></td>`).join('')}
                 </tr>
             `;
         }
@@ -1811,7 +1773,6 @@
                 `;
             });
 
-            // Date edit handler
             document.querySelectorAll('.date-edit').forEach(input => {
                 input.addEventListener('blur', async (e) => {
                     const id = e.target.dataset.id;
@@ -1830,9 +1791,7 @@
                         }
                     }
                 });
-                input.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') e.target.blur();
-                });
+                input.addEventListener('keypress', (e) => { if (e.key === 'Enter') e.target.blur(); });
             });
 
             document.querySelectorAll('.category-select').forEach(select => {
@@ -1884,9 +1843,7 @@
                                 ${user.role.toUpperCase()}
                             </span>
                         </td>
-                        <td class="px-6 py-4 text-xs text-gray-500">
-                            ${accessDescriptions[user.role]}
-                        </td>
+                        <td class="px-6 py-4 text-xs text-gray-500">${accessDescriptions[user.role]}</td>
                         <td class="px-6 py-4 text-center">
                             ${user.email !== currentUser.email ? 
                                 `<button onclick="deleteUser('${user.id}')" class="text-red-600 hover:text-red-900 font-bold">✕</button>` : 
@@ -1905,7 +1862,6 @@
             }
         }
 
-        // Add User Modal
         document.getElementById('add-user-btn').addEventListener('click', () => {
             document.getElementById('user-modal').classList.remove('hidden');
         });
@@ -1914,7 +1870,6 @@
             document.getElementById('user-modal').classList.add('hidden');
         });
 
-        // Update role description when role changes
         document.addEventListener('DOMContentLoaded', () => {
             const roleSelect = document.getElementById('new-user-role');
             const roleDescription = document.getElementById('role-description');
@@ -1952,94 +1907,60 @@
             const exportBtn = document.getElementById('export-data-btn');
             if (exportBtn) {
                 exportBtn.addEventListener('click', () => {
-                    // Prepare CSV content
                     let csvContent = '';
-                    
-                    // Header
                     csvContent += 'ROTARY DISTRICT 1913 - IZVOZ PODATAKA\n';
                     csvContent += `Datum izvoza: ${new Date().toLocaleString('hr-HR')}\n`;
-                    csvContent += `Korisnik: ${currentUser ? currentUser.name : 'N/A'}\n`;
-                    csvContent += '\n';
+                    csvContent += `Korisnik: ${currentUser ? currentUser.name : 'N/A'}\n\n`;
+                    csvContent += 'BUDZET - PREGLED\nKategorija,Tip,Budžet (EUR),Realizirano (EUR),Razlika (EUR)\n';
                     
-                    // Budget Summary
-                    csvContent += 'BUDZET - PREGLED\n';
-                    csvContent += 'Kategorija,Tip,Budžet (EUR),Realizirano (EUR),Razlika (EUR)\n';
-                    
-                    // Income budget
                     const incomeByCategory = {};
                     transactions.filter(t => t.type === 'income' && t.category).forEach(t => {
                         incomeByCategory[t.category] = (incomeByCategory[t.category] || 0) + Math.abs(t.amount);
                     });
-                    
                     INCOME_CATEGORIES.forEach(cat => {
                         const budget = budgetData.income[cat] || 0;
                         const actual = incomeByCategory[cat] || 0;
-                        const diff = actual - budget;
-                        csvContent += `${cat},Prihod,${budget},${actual},${diff}\n`;
+                        csvContent += `${cat},Prihod,${budget},${actual},${actual - budget}\n`;
                     });
                     
-                    // Expense budget
                     const expenseByCategory = {};
                     transactions.filter(t => t.type === 'expense' && t.category).forEach(t => {
                         expenseByCategory[t.category] = (expenseByCategory[t.category] || 0) + Math.abs(t.amount);
                     });
-                    
                     EXPENSE_CATEGORIES.forEach(cat => {
                         const budget = budgetData.expenses[cat] || 0;
                         const actual = expenseByCategory[cat] || 0;
-                        const diff = budget - actual;
-                        csvContent += `${cat},Rashod,${budget},${actual},${diff}\n`;
+                        csvContent += `${cat},Rashod,${budget},${actual},${budget - actual}\n`;
                     });
                     
-                    csvContent += '\n';
-                    
-                    // Totals
                     const incomeActual = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + Math.abs(t.amount), 0);
                     const expenseActual = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + Math.abs(t.amount), 0);
                     const incomeBudget = Object.values(budgetData.income).reduce((sum, v) => sum + v, 0);
                     const expenseBudget = Object.values(budgetData.expenses).reduce((sum, v) => sum + v, 0);
                     
-                    csvContent += 'UKUPNO\n';
-                    csvContent += `Tip,Budžet (EUR),Realizirano (EUR)\n`;
-                    csvContent += `Prihodi,${incomeBudget},${incomeActual}\n`;
-                    csvContent += `Rashodi,${expenseBudget},${expenseActual}\n`;
-                    csvContent += `Saldo,${incomeBudget - expenseBudget},${incomeActual - expenseActual}\n`;
-                    csvContent += '\n';
-                    
-                    // All Transactions
-                    csvContent += 'SVE TRANSAKCIJE\n';
-                    csvContent += 'Datum,Opis,Tip,Kategorija,Iznos (EUR)\n';
-                    
+                    csvContent += `\nUKUPNO\nTip,Budžet (EUR),Realizirano (EUR)\n`;
+                    csvContent += `Prihodi,${incomeBudget},${incomeActual}\nRashodi,${expenseBudget},${expenseActual}\nSaldo,${incomeBudget - expenseBudget},${incomeActual - expenseActual}\n\n`;
+                    csvContent += 'SVE TRANSAKCIJE\nDatum,Opis,Tip,Kategorija,Iznos (EUR)\n';
                     transactions.forEach(trans => {
                         const escapedDesc = trans.description.replace(/"/g, '""');
                         csvContent += `${trans.date},"${escapedDesc}",${trans.type === 'income' ? 'Prihod' : 'Rashod'},${trans.category || 'Nekategorizirano'},${trans.amount}\n`;
                     });
                     
-                    // Create download
                     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                     const link = document.createElement('a');
-                    const url = URL.createObjectURL(blob);
-                    
-                    const timestamp = new Date().toISOString().split('T')[0];
-                    link.setAttribute('href', url);
-                    link.setAttribute('download', `Rotary_D1913_Export_${timestamp}.csv`);
+                    link.setAttribute('href', URL.createObjectURL(blob));
+                    link.setAttribute('download', `Rotary_D1913_Export_${new Date().toISOString().split('T')[0]}.csv`);
                     link.style.visibility = 'hidden';
-                    
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
-                    
                     alert('Podaci su uspješno exportani!');
                 });
             }
         });
 
         // ===== PRIHOD PO KLUBU FUNCTIONS =====
-        
-        function loadClubsData() {
-            // Data already loaded in loadData() from Supabase
-            // This is kept for compatibility but does nothing
-        }
+        function loadClubsData() {}
 
         function logPrihodActivity(type, item, field, oldVal, newVal) {
             const ts = new Date().toLocaleString('hr-HR');
@@ -2110,10 +2031,6 @@
                 const c = clubsData[n];
                 total += (c.rotaryMembers * 50) + (c.spouses * 30) + (c.rotaractMembers * 25);
             }
-            
-            console.log('Updating budget from clubs. Total membership fees:', total);
-            console.log('Clubs data:', clubsData);
-            
             budgetData.income['Prihodi od članarina'] = total;
             budgetData.income['Prihodi od donacija RI za pokriće troškova DG'] = otherIncomeData['Prihodi od donacija RI za pokriće troškova DG'].planned;
             budgetData.income['Prihodi od kotizacija za YE, Rotary kamp, RYLA'] = otherIncomeData['Prihodi od kotizacija za YE, Rotary kamp, RYLA'].planned;
@@ -2121,9 +2038,6 @@
             budgetData.income['Prihodi od kamata na depozite poviđenju'] = otherIncomeData['Prihodi od kamata na depozite poviđenju'].planned;
             budgetData.income['Ostali prihodi'] = otherIncomeData['Ostali prihodi'].planned;
             budgetData.income['Sredstva iz viška sredstava prethodnih godina'] = otherIncomeData['Sredstva iz viška sredstava prethodnih godina'].planned;
-            
-            console.log('Updated budgetData.income:', budgetData.income);
-            // Don't auto-save here - save explicitly when user clicks Save
         }
 
         function renderClubs() {
@@ -2144,13 +2058,11 @@
             }
 
             const canEdit = currentUser && (currentUser.role === 'admin' || currentUser.role === 'editor');
-            
             names.forEach(n => {
                 const c = clubsData[n];
                 const p = (c.rotaryMembers * 50) + (c.spouses * 30) + (c.rotaractMembers * 25);
                 const rem = p - c.actualPayment;
                 tR += c.rotaryMembers; tS += c.spouses; tRa += c.rotaractMembers; tP += p; tA += c.actualPayment;
-                
                 tb.innerHTML += `<tr class="border-b hover:bg-gray-50">
                     <td class="px-4 py-3 font-medium">${n}</td>
                     <td class="px-4 py-3 text-center"><input type="number" min="0" value="${c.rotaryMembers}" data-club="${n}" data-f="rotaryMembers" class="ci w-20 px-2 py-1 border rounded text-center" ${!canEdit ? 'disabled' : ''}></td>
@@ -2176,7 +2088,6 @@
                 const newV = f === 'actualPayment' ? parseFloat(e.target.value) || 0 : parseInt(e.target.value) || 0;
                 if (old !== newV) logPrihodActivity('club', n, f, old, newV);
                 clubsData[n][f] = newV;
-                // Update totals without full re-render
                 updateMainBudgetFromClubs();
             }));
         }
@@ -2186,7 +2097,6 @@
             if (!c) return;
             c.innerHTML = '';
             const canEdit = currentUser && (currentUser.role === 'admin' || currentUser.role === 'editor');
-            
             for (let cat in otherIncomeData) {
                 const d = otherIncomeData[cat];
                 const rem = d.planned - d.actual;
@@ -2202,7 +2112,6 @@
                     </div>
                 </div>`;
             }
-            
             document.querySelectorAll('.oi').forEach(i => i.addEventListener('change', e => {
                 const cat = e.target.dataset.cat;
                 const f = e.target.dataset.f;
@@ -2214,30 +2123,25 @@
             }));
         }
 
-        // ===== MANUAL ENTRY FUNCTIONS =====
-        
-        function loadManualEntryLog() {
-            // Data already loaded in loadData() from Supabase
-        }
+        // ==========================================
+        // FIX 3: MANUAL ENTRY - bez id-a, koristimo returned data
+        // ==========================================
+        function loadManualEntryLog() {}
 
         function renderManualEntryLog() {
             const container = document.getElementById('manual-entry-log');
             if (!container) return;
-            
             if (manualEntryLog.length === 0) {
                 container.innerHTML = '<p class="text-sm text-gray-500 italic text-center py-8">Još nema ručno unesenih transakcija...</p>';
                 return;
             }
-            
             container.innerHTML = manualEntryLog.map(entry => `
                 <div class="mb-3 p-4 bg-white rounded-lg border-l-4 ${entry.type === 'income' ? 'border-green-500' : 'border-red-500'} shadow-sm">
                     <div class="flex justify-between items-start mb-2">
                         <div class="flex-1">
                             <p class="font-semibold text-gray-800">${entry.category}</p>
                             <p class="text-sm text-gray-600 mt-1">${entry.description || 'Bez opisa'}</p>
-                            <p class="text-lg font-bold ${entry.type === 'income' ? 'text-green-600' : 'text-red-600'} mt-2">
-                                €${entry.amount.toLocaleString()}
-                            </p>
+                            <p class="text-lg font-bold ${entry.type === 'income' ? 'text-green-600' : 'text-red-600'} mt-2">€${entry.amount.toLocaleString()}</p>
                         </div>
                         <div class="text-right">
                             <span class="text-xs px-2 py-1 rounded ${entry.type === 'income' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
@@ -2246,9 +2150,7 @@
                             <p class="text-xs text-gray-500 mt-2">${entry.date}</p>
                         </div>
                     </div>
-                    <div class="text-xs text-gray-500 mt-2 pt-2 border-t">
-                        <span class="font-medium">${entry.user}</span> • ${entry.timestamp}
-                    </div>
+                    <div class="text-xs text-gray-500 mt-2 pt-2 border-t"><span class="font-medium">${entry.user}</span> • ${entry.timestamp}</div>
                 </div>
             `).join('');
         }
@@ -2259,13 +2161,10 @@
             const categorySelect = document.getElementById('manual-category');
             const dateInput = document.getElementById('manual-date');
             
-            // Set today's date as default
             if (dateInput) {
-                const today = new Date().toISOString().split('T')[0];
-                dateInput.value = today;
+                dateInput.value = new Date().toISOString().split('T')[0];
             }
             
-            // Update categories when type changes
             if (typeSelect && categorySelect) {
                 typeSelect.addEventListener('change', (e) => {
                     categorySelect.innerHTML = '<option value="">Odaberi kategoriju...</option>';
@@ -2276,7 +2175,6 @@
                 });
             }
             
-            // Handle form submission
             if (form) {
                 form.addEventListener('submit', async (e) => {
                     e.preventDefault();
@@ -2292,24 +2190,35 @@
                         return;
                     }
                     
-                    // Format date to DD.MM.YYYY
                     const [year, month, day] = date.split('-');
                     const formattedDate = `${day}.${month}.${year}`;
                     
-                    // Create transaction
-                    const transaction = {
-                        id: Date.now(),
+                    // NE šaljemo id - Supabase će auto-generirati UUID
+                    const { data: inserted, error } = await sb.from('transactions').insert({
                         date: formattedDate,
                         description: description || `Ručni unos - ${category}`,
                         type: type,
                         category: category,
                         amount: type === 'income' ? amount : -amount,
                         source: 'manual'
-                    };
-                    
-                    // Add to transactions
-                    transactions.push(transaction);
-                    
+                    }).select().single();
+
+                    if (error) {
+                        alert('Greška pri spremanju: ' + error.message);
+                        return;
+                    }
+
+                    // Dodaj u lokalnu listu s pravim UUID-om iz Supabase
+                    transactions.unshift({
+                        id: inserted.id,
+                        date: inserted.date,
+                        description: inserted.description,
+                        type: inserted.type,
+                        category: inserted.category,
+                        amount: parseFloat(inserted.amount),
+                        source: inserted.source
+                    });
+
                     // Log entry
                     const logEntry = {
                         timestamp: new Date().toLocaleString('hr-HR'),
@@ -2320,19 +2229,7 @@
                         amount: amount,
                         description: description || `Ručni unos - ${category}`
                     };
-                    
-                    // Save to Supabase
-                    await sb.from('transactions').insert({
-                        id: transaction.id.toString(),
-                        date: transaction.date,
-                        description: transaction.description,
-                        type: transaction.type,
-                        category: transaction.category,
-                        amount: transaction.amount,
-                        source: 'manual'
-                    });
 
-                    // Log entry to Supabase
                     await sb.from('activity_logs').insert({
                         log_type: 'manual_entry',
                         description: logEntry.description,
@@ -2345,12 +2242,10 @@
                     manualEntryLog.unshift(logEntry);
                     if (manualEntryLog.length > 100) manualEntryLog = manualEntryLog.slice(0, 100);
                     
-                    // Reset form
                     document.getElementById('manual-amount').value = '';
                     document.getElementById('manual-description').value = '';
                     document.getElementById('manual-category').value = '';
                     
-                    // Refresh displays
                     renderDashboard();
                     renderRealizirano();
                     renderTransactions();
@@ -2375,7 +2270,6 @@
             }
         }
 
-        // Add club button and save buttons
         document.addEventListener('DOMContentLoaded', () => {
             const addBtn = document.getElementById('add-club-btn');
             if (addBtn) addBtn.addEventListener('click', async () => {
@@ -2417,7 +2311,6 @@
                     user_name: currentUser ? currentUser.name : 'System',
                     user_id: currentUser ? currentUser.id : null
                 });
-                // Reload fresh from DB to confirm - only update if data returned
                 const { data: clubRows, error: clubError } = await sb.from('clubs').select('*');
                 if (clubRows && clubRows.length > 0) {
                     clubsData = {};
@@ -2429,10 +2322,7 @@
                             actualPayment: parseFloat(c.actual_payment) || 0
                         };
                     });
-                } else if (clubError) {
-                    console.error('Club reload error:', clubError);
                 }
-                // Reload prihodi log
                 const { data: prihodiRows } = await sb.from('activity_logs').select('*').in('log_type', ['club_change', 'club_added', 'club_deleted', 'income_change']).order('created_at', { ascending: false }).limit(100);
                 if (prihodiRows) {
                     prihodiLog = prihodiRows.map(r => ({
@@ -2454,7 +2344,6 @@
             const saveOther = document.getElementById('save-other');
             if (saveOther) saveOther.addEventListener('click', async () => {
                 showLoading(true);
-                // Save each other income to Supabase
                 for (const [category, vals] of Object.entries(otherIncomeData)) {
                     await sb.from('other_income').upsert({
                         category: category,
@@ -2476,8 +2365,7 @@
             });
         });
 
-        // Initialize
-        console.log('🚀 Rotary District 1913 Budget Tracker - Supabase Version');
+        console.log('🚀 Rotary District 1913 Budget Tracker - Supabase Version (Fixed)');
         console.log('🌐 Cloud storage:', SUPABASE_URL);
     </script>
 </body>
