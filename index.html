@@ -531,6 +531,7 @@
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Opis</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tip</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kategorija</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Klub</th>
                                     <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Iznos</th>
                                     <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Izvor</th>
                                     <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase edit-column">Akcije</th>
@@ -768,7 +769,8 @@
                     type: t.type,
                     category: t.category || '',
                     amount: parseFloat(t.amount),
-                    source: t.source || 'manual'
+                    source: t.source || 'manual',
+                    club_name: t.club_name || null
                 }));
 
                 // 3. Users
@@ -1341,7 +1343,8 @@
                         type: type,
                         category: '',
                         amount: amount,
-                        source: 'xls'
+                        source: 'xls',
+                        club_name: null
                     });
                 }
 
@@ -1464,7 +1467,8 @@
                     type: t.type,
                     category: t.category || '',
                     amount: t.amount,
-                    source: 'xls'
+                    source: 'xls',
+                    club_name: t.club_name || null
                 }));
 
                 const { data: inserted, error } = await sb.from('transactions').insert(insertRows).select();
@@ -1482,7 +1486,8 @@
                     type: t.type,
                     category: t.category || '',
                     amount: parseFloat(t.amount),
-                    source: t.source || 'xls'
+                    source: t.source || 'xls',
+                    club_name: t.club_name || null
                 }));
 
                 transactions = [...savedTransactions, ...transactions];
@@ -1776,6 +1781,24 @@
                     ? '<span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">📊 XLS/CSV</span>'
                     : '<span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">✍️ Ručno</span>';
 
+                // Dropdown za klub - samo za prihode
+                const clubNames = Object.keys(clubsData).sort();
+                let clubDropdown = '—';
+                if (trans.type === 'income') {
+                    if (canEdit) {
+                        clubDropdown = `
+                            <select data-id="${trans.id}" data-field="club_name" class="trans-edit-input club-select border rounded px-2 py-1 text-xs focus:ring-2 focus:ring-yellow-500 w-full">
+                                <option value="">—</option>
+                                ${clubNames.map(club => 
+                                    `<option value="${club}" ${club === trans.club_name ? 'selected' : ''}>${club}</option>`
+                                ).join('')}
+                            </select>
+                        `;
+                    } else {
+                        clubDropdown = trans.club_name || '—';
+                    }
+                }
+
                 tbody.innerHTML += `
                     <tr class="hover:bg-gray-50 border-b">
                         <td class="px-6 py-4 text-sm">
@@ -1803,6 +1826,7 @@
                                 </select>
                             ` : (trans.category || '—')}
                         </td>
+                        <td class="px-6 py-4 text-sm">${clubDropdown}</td>
                         <td class="px-6 py-4 text-right font-medium ${trans.type === 'income' ? 'text-green-600' : 'text-red-600'}">
                             €${Math.abs(trans.amount).toLocaleString()}
                         </td>
@@ -1846,6 +1870,12 @@
                             if (newVal !== trans.category) {
                                 pendingChanges.push({ id, field, oldVal: trans.category, newVal, trans });
                             }
+                        } else if (field === 'club_name') {
+                            // Prazan string znači odabrana je prazna opcija "—"
+                            const normalizedNewVal = newVal === '' ? null : newVal;
+                            if (normalizedNewVal !== trans.club_name) {
+                                pendingChanges.push({ id, field, oldVal: trans.club_name, newVal: normalizedNewVal, trans });
+                            }
                         }
                     });
 
@@ -1857,7 +1887,11 @@
                     showLoading(true);
 
                     for (const ch of pendingChanges) {
-                        const updateData = ch.field === 'date' ? { date: ch.newVal } : { category: ch.newVal };
+                        let updateData = {};
+                        if (ch.field === 'date') updateData.date = ch.newVal;
+                        else if (ch.field === 'category') updateData.category = ch.newVal;
+                        else if (ch.field === 'club_name') updateData.club_name = ch.newVal;
+
                         const { error } = await sb.from('transactions').update(updateData).eq('id', ch.id);
                         if (error) {
                             showLoading(false);
@@ -1867,28 +1901,47 @@
 
                         // Ažuriraj lokalni objekt
                         if (ch.field === 'date') ch.trans.date = ch.newVal;
-                        else ch.trans.category = ch.newVal;
+                        else if (ch.field === 'category') ch.trans.category = ch.newVal;
+                        else if (ch.field === 'club_name') ch.trans.club_name = ch.newVal;
 
                         // Dodaj u log
+                        const fieldLabels = { date: 'Datum', category: 'Kategorija', club_name: 'Klub' };
                         const logEntry = {
                             timestamp: new Date().toLocaleString('hr-HR'),
                             user: currentUser ? currentUser.name : 'System',
                             field: ch.field,
                             description: ch.trans.description.substring(0, 40),
                             oldValue: ch.oldVal || '—',
-                            newValue: ch.newVal
+                            newValue: ch.newVal || '—'
                         };
                         transactionChanges.unshift(logEntry);
 
                         // Spremi u Supabase log
                         await sb.from('activity_logs').insert({
                             log_type: 'transaction_edit',
-                            description: `${ch.field === 'date' ? 'Datum' : 'Kategorija'} promijenjena: ${ch.trans.description.substring(0, 40)}`,
+                            description: `${fieldLabels[ch.field]} promijenjena: ${ch.trans.description.substring(0, 40)}`,
                             old_value: ch.oldVal || '',
-                            new_value: ch.newVal,
+                            new_value: ch.newVal || '',
                             user_name: currentUser ? currentUser.name : 'System',
                             user_id: currentUser ? currentUser.id : null
                         });
+                    }
+
+                    // Sada preračunaj "Uplaćeno €" za svaki klub na temelju transakcija
+                    const clubPayments = {};
+                    transactions.forEach(t => {
+                        if (t.type === 'income' && t.club_name && clubsData[t.club_name]) {
+                            clubPayments[t.club_name] = (clubPayments[t.club_name] || 0) + Math.abs(t.amount);
+                        }
+                    });
+
+                    // Ažuriraj clubsData i spremi u Supabase
+                    for (const clubName in clubsData) {
+                        const newActualPayment = clubPayments[clubName] || 0;
+                        if (clubsData[clubName].actualPayment !== newActualPayment) {
+                            clubsData[clubName].actualPayment = newActualPayment;
+                            await sb.from('clubs').update({ actual_payment: newActualPayment }).eq('name', clubName);
+                        }
                     }
 
                     showLoading(false);
@@ -1898,6 +1951,7 @@
 
                     renderDashboard();
                     renderTransactionsLog();
+                    renderClubs(); // Osvježi prikaz klubova
 
                     newSaveBtn.textContent = '✅ Spremljeno!';
                     setTimeout(() => { newSaveBtn.textContent = '💾 Spremi promjene'; }, 2000);
@@ -2297,7 +2351,8 @@
                         type: type,
                         category: category,
                         amount: type === 'income' ? amount : -amount,
-                        source: 'manual'
+                        source: 'manual',
+                        club_name: null
                     }).select().single();
 
                     if (error) {
@@ -2313,7 +2368,8 @@
                         type: inserted.type,
                         category: inserted.category,
                         amount: parseFloat(inserted.amount),
-                        source: inserted.source
+                        source: inserted.source,
+                        club_name: inserted.club_name || null
                     });
 
                     // Log entry
