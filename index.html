@@ -507,45 +507,19 @@
                         <input type="text" id="manual-description" placeholder="Unesite opis transakcije..." class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-rotary-gold" />
                     </div>
                 </div>
-
-                <!-- Transactions Table -->
-                <div class="bg-white rounded-2xl shadow-lg overflow-hidden border-t-0 border-rotary-gold mb-6">
-                    <div class="p-6 border-b bg-rotary-gold-light">
-                        <h2 class="text-xl font-semibold text-rotary-blue">Realizirani prihodi i rashodi</h2>
-                        <p class="text-gray-600 text-sm mt-1">Pregled svih učitanih transakcija s mogućnošću kategorizacije</p>
-                    </div>
-                    
-                    <div class="overflow-x-auto">
-                        <table class="w-full">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Datum</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Opis</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tip</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kategorija</th>
-                                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Iznos</th>
-                                </tr>
-                            </thead>
-                            <tbody id="realizirano-table-body"></tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Activity Log -->
-                <div class="bg-white rounded-2xl shadow-lg p-6 border-t-4 border-rotary-gold">
-                    <h2 class="text-xl font-semibold text-rotary-blue mb-4">📋 Log aktivnosti - Ručni unosi</h2>
-                    <div class="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto" id="manual-entry-log">
-                        <p class="text-sm text-gray-500 italic text-center py-8">Još nema ručno unesenih transakcija...</p>
-                    </div>
-                </div>
             </div>
 
             <!-- Transactions Tab -->
             <div id="tab-transactions" class="tab-content hidden">
-                <div class="bg-white rounded-2xl shadow-lg overflow-hidden border-t-0 border-rotary-gold">
-                    <div class="p-6 border-b bg-rotary-gold-light">
-                        <h2 class="text-xl font-semibold text-rotary-blue">Sve transakcije</h2>
-                        <p class="text-gray-600 text-sm mt-1">Ukupno: <span id="transaction-count">0</span> transakcija</p>
+                <div class="bg-white rounded-2xl shadow-lg overflow-hidden border-t-0 border-rotary-gold mb-6">
+                    <div class="p-6 border-b bg-rotary-gold-light flex justify-between items-center">
+                        <div>
+                            <h2 class="text-xl font-semibold text-rotary-blue">Sve transakcije</h2>
+                            <p class="text-gray-600 text-sm mt-1">Ukupno: <span id="transaction-count">0</span> transakcija</p>
+                        </div>
+                        <button id="save-transactions-btn" class="hidden rotary-gold text-white px-5 py-2 rounded-2xl font-semibold shadow-lg edit-column">
+                            💾 Spremi promjene
+                        </button>
                     </div>
                     
                     <div class="overflow-x-auto">
@@ -553,15 +527,25 @@
                             <thead class="bg-gray-50">
                                 <tr>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Datum</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mjesec</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Opis</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tip</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kategorija</th>
                                     <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Iznos</th>
+                                    <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Izvor</th>
                                     <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase edit-column">Akcije</th>
                                 </tr>
                             </thead>
                             <tbody id="transactions-table-body"></tbody>
                         </table>
+                    </div>
+                </div>
+
+                <!-- Transactions Activity Log -->
+                <div class="bg-white rounded-2xl shadow-lg p-6 border-t-4 border-rotary-gold">
+                    <h2 class="text-xl font-semibold text-rotary-blue mb-4">📋 Log promjena transakcija</h2>
+                    <div class="bg-gray-50 rounded-lg p-4 max-h-64 overflow-y-auto" id="transactions-activity-log">
+                        <p class="text-sm text-gray-500 italic text-center py-8">Još nema promjena...</p>
                     </div>
                 </div>
             </div>
@@ -1004,13 +988,14 @@
             initBudgetInputs();
             renderDashboard();
             renderTransactions();
-            renderRealizirano();
+
             renderUsers();
             renderActivityLog();
             renderClubs();
             renderOtherIncome();
             renderPrihodiLog();
             renderManualEntryLog();
+            renderTransactionsLog();
             setupManualEntryForm();
         }
 
@@ -1507,7 +1492,7 @@
                 showLoading(false);
 
                 renderTransactions();
-                renderRealizirano();
+
                 renderDashboard();
 
                 alert(`✅ Uspješno spremljeno ${insertRows.length} transakcija!`);
@@ -1730,24 +1715,79 @@
         }
 
         // Render Transactions
+        // Helper: iz datuma DD.MM.YYYY izvuci "MM/YYYY"
+        function dateToPeriod(dateStr) {
+            if (!dateStr) return '—';
+            const parts = dateStr.split('.');
+            if (parts.length < 3) return '—';
+            const month = parts[1].padStart(2, '0');
+            const year = parts[2];
+            return `${month}/${year}`;
+        }
+
+        // Log promjena na transakcijama
+        let transactionChanges = [];
+
+        function renderTransactionsLog() {
+            const container = document.getElementById('transactions-activity-log');
+            if (!container) return;
+            if (transactionChanges.length === 0) {
+                container.innerHTML = '<p class="text-sm text-gray-500 italic text-center py-8">Još nema promjena...</p>';
+                return;
+            }
+            container.innerHTML = transactionChanges.map(ch => `
+                <div class="mb-3 p-3 bg-white rounded-lg border-l-4 ${ch.field === 'category' ? 'border-blue-400' : 'border-yellow-400'} shadow-sm">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-sm font-semibold text-gray-800">${ch.description}</p>
+                            <p class="text-xs text-gray-600 mt-1">
+                                <span class="line-through text-gray-400">${ch.oldValue || '—'}</span>
+                                → <span class="font-semibold text-rotary-blue">${ch.newValue}</span>
+                            </p>
+                        </div>
+                        <span class="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600">
+                            ${ch.field === 'category' ? '🏷️ Kategorija' : '📅 Datum'}
+                        </span>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-2">
+                        <span class="font-medium">${ch.user}</span> • ${ch.timestamp}
+                    </div>
+                </div>
+            `).join('');
+        }
+
         function renderTransactions() {
             const tbody = document.getElementById('transactions-table-body');
             tbody.innerHTML = '';
             document.getElementById('transaction-count').textContent = transactions.length;
 
+            const canEdit = currentUser && (currentUser.role === 'admin' || currentUser.role === 'editor');
+
+            // Prikaži gumb za spremanje samo ako može editirati
+            const saveBtn = document.getElementById('save-transactions-btn');
+            if (saveBtn) {
+                if (canEdit) saveBtn.classList.remove('hidden');
+                else saveBtn.classList.add('hidden');
+            }
+
             transactions.forEach(trans => {
-                const canEdit = currentUser && (currentUser.role === 'admin' || currentUser.role === 'editor');
+                const period = dateToPeriod(trans.date);
+                const sourceLabel = trans.source === 'xls' || trans.source === 'csv'
+                    ? '<span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">📊 XLS/CSV</span>'
+                    : '<span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">✍️ Ručno</span>';
+
                 tbody.innerHTML += `
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-6 py-4">
+                    <tr class="hover:bg-gray-50 border-b">
+                        <td class="px-6 py-4 text-sm">
                             ${canEdit ? `
-                                <input type="text" value="${trans.date}" 
-                                       data-id="${trans.id}" 
-                                       class="date-edit border rounded px-2 py-1 w-28 focus:ring-2 focus:ring-yellow-500"
+                                <input type="text" value="${trans.date}"
+                                       data-id="${trans.id}" data-field="date"
+                                       class="trans-edit-input border rounded px-2 py-1 w-28 focus:ring-2 focus:ring-yellow-500 text-sm"
                                        placeholder="DD.MM.YYYY" />
                             ` : trans.date}
                         </td>
-                        <td class="px-6 py-4">${trans.description}</td>
+                        <td class="px-6 py-4 text-sm font-medium text-gray-700">${period}</td>
+                        <td class="px-6 py-4 text-sm">${trans.description}</td>
                         <td class="px-6 py-4">
                             <span class="px-2 py-1 text-xs rounded-full ${trans.type === 'income' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
                                 ${trans.type === 'income' ? 'Prihod' : 'Rashod'}
@@ -1755,9 +1795,9 @@
                         </td>
                         <td class="px-6 py-4">
                             ${canEdit ? `
-                                <select data-id="${trans.id}" class="category-select border rounded px-2 py-1 focus:ring-2 focus:ring-yellow-500">
+                                <select data-id="${trans.id}" data-field="category" class="trans-edit-input category-select border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-yellow-500">
                                     <option value="">Odaberi...</option>
-                                    ${(trans.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(cat => 
+                                    ${(trans.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(cat =>
                                         `<option value="${cat}" ${cat === trans.category ? 'selected' : ''}>${cat}</option>`
                                     ).join('')}
                                 </select>
@@ -1766,45 +1806,103 @@
                         <td class="px-6 py-4 text-right font-medium ${trans.type === 'income' ? 'text-green-600' : 'text-red-600'}">
                             €${Math.abs(trans.amount).toLocaleString()}
                         </td>
+                        <td class="px-6 py-4 text-center">${sourceLabel}</td>
                         <td class="px-6 py-4 text-center edit-column">
-                            ${canEdit ? `<button onclick="deleteTransaction('${trans.id}')" class="text-red-600 hover:text-red-900 font-bold">✕</button>` : ''}
+                            ${canEdit ? `<button onclick="deleteTransaction('${trans.id}')" class="text-red-500 hover:text-red-800 font-bold text-lg leading-none">✕</button>` : ''}
                         </td>
                     </tr>
                 `;
             });
 
-            document.querySelectorAll('.date-edit').forEach(input => {
-                input.addEventListener('blur', async (e) => {
-                    const id = e.target.dataset.id;
-                    const newDate = e.target.value.trim();
-                    const trans = transactions.find(t => t.id == id);
-                    if (trans && newDate) {
-                        const datePattern = /^\d{1,2}\.\d{1,2}\.\d{4}$/;
-                        if (datePattern.test(newDate)) {
-                            trans.date = newDate;
-                            await sb.from('transactions').update({ date: newDate }).eq('id', trans.id);
-                            renderDashboard();
-                            renderRealizirano();
-                        } else {
-                            alert('Neispravan format datuma! Koristite: DD.MM.YYYY');
-                            e.target.value = trans.date;
-                        }
-                    }
-                });
-                input.addEventListener('keypress', (e) => { if (e.key === 'Enter') e.target.blur(); });
-            });
+            // Gumb za spremanje - prikuplja sve promjene i sprema odjednom
+            if (saveBtn) {
+                // Ukloni stari listener da se ne dupličira
+                const newSaveBtn = saveBtn.cloneNode(true);
+                saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
 
-            document.querySelectorAll('.category-select').forEach(select => {
-                select.addEventListener('change', async (e) => {
-                    const id = e.target.dataset.id;
-                    const trans = transactions.find(t => t.id == id);
-                    if (trans) {
-                        trans.category = e.target.value;
-                        await sb.from('transactions').update({ category: e.target.value }).eq('id', trans.id);
-                        renderDashboard();
+                newSaveBtn.addEventListener('click', async () => {
+                    // Skupi sve izmijenjene vrijednosti iz inputa/selecta
+                    const pendingChanges = [];
+
+                    document.querySelectorAll('.trans-edit-input').forEach(el => {
+                        const id = el.dataset.id;
+                        const field = el.dataset.field;
+                        const trans = transactions.find(t => t.id == id);
+                        if (!trans) return;
+
+                        const newVal = el.value.trim();
+
+                        if (field === 'date') {
+                            if (newVal && newVal !== trans.date) {
+                                const datePattern = /^\d{1,2}\.\d{1,2}\.\d{4}$/;
+                                if (!datePattern.test(newVal)) {
+                                    alert(`Neispravan format datuma za transakciju: "${trans.description}"\nKoristite: DD.MM.YYYY`);
+                                    el.value = trans.date;
+                                    return;
+                                }
+                                pendingChanges.push({ id, field, oldVal: trans.date, newVal, trans });
+                            }
+                        } else if (field === 'category') {
+                            if (newVal !== trans.category) {
+                                pendingChanges.push({ id, field, oldVal: trans.category, newVal, trans });
+                            }
+                        }
+                    });
+
+                    if (pendingChanges.length === 0) {
+                        alert('Nema promjena za spremiti.');
+                        return;
                     }
+
+                    showLoading(true);
+
+                    for (const ch of pendingChanges) {
+                        const updateData = ch.field === 'date' ? { date: ch.newVal } : { category: ch.newVal };
+                        const { error } = await sb.from('transactions').update(updateData).eq('id', ch.id);
+                        if (error) {
+                            showLoading(false);
+                            alert('Greška pri spremanju: ' + error.message);
+                            return;
+                        }
+
+                        // Ažuriraj lokalni objekt
+                        if (ch.field === 'date') ch.trans.date = ch.newVal;
+                        else ch.trans.category = ch.newVal;
+
+                        // Dodaj u log
+                        const logEntry = {
+                            timestamp: new Date().toLocaleString('hr-HR'),
+                            user: currentUser ? currentUser.name : 'System',
+                            field: ch.field,
+                            description: ch.trans.description.substring(0, 40),
+                            oldValue: ch.oldVal || '—',
+                            newValue: ch.newVal
+                        };
+                        transactionChanges.unshift(logEntry);
+
+                        // Spremi u Supabase log
+                        await sb.from('activity_logs').insert({
+                            log_type: 'transaction_edit',
+                            description: `${ch.field === 'date' ? 'Datum' : 'Kategorija'} promijenjena: ${ch.trans.description.substring(0, 40)}`,
+                            old_value: ch.oldVal || '',
+                            new_value: ch.newVal,
+                            user_name: currentUser ? currentUser.name : 'System',
+                            user_id: currentUser ? currentUser.id : null
+                        });
+                    }
+
+                    showLoading(false);
+
+                    // Osvježi sve poglede
+                    renderTransactions();
+
+                    renderDashboard();
+                    renderTransactionsLog();
+
+                    newSaveBtn.textContent = '✅ Spremljeno!';
+                    setTimeout(() => { newSaveBtn.textContent = '💾 Spremi promjene'; }, 2000);
                 });
-            });
+            }
         }
 
         async function deleteTransaction(id) {
@@ -1812,7 +1910,6 @@
                 await sb.from('transactions').delete().eq('id', id);
                 transactions = transactions.filter(t => t.id != id);
                 renderTransactions();
-                renderRealizirano();
                 renderDashboard();
             }
         }
@@ -2247,7 +2344,7 @@
                     document.getElementById('manual-category').value = '';
                     
                     renderDashboard();
-                    renderRealizirano();
+
                     renderTransactions();
                     renderManualEntryLog();
                     
