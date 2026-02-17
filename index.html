@@ -1929,7 +1929,7 @@
             budgetData.income['Sredstva iz viška sredstava prethodnih godina'] = otherIncomeData['Sredstva iz viška sredstava prethodnih godina'].planned;
             
             console.log('Updated budgetData.income:', budgetData.income);
-            saveData('rotary-budget', budgetData);
+            // Don't auto-save here - save explicitly when user clicks Save
         }
 
         function renderClubs() {
@@ -1982,7 +1982,8 @@
                 const newV = f === 'actualPayment' ? parseFloat(e.target.value) || 0 : parseInt(e.target.value) || 0;
                 if (old !== newV) logPrihodActivity('club', n, f, old, newV);
                 clubsData[n][f] = newV;
-                renderClubs();
+                // Update totals without full re-render
+                updateMainBudgetFromClubs();
             }));
         }
 
@@ -2202,27 +2203,55 @@
             const saveClubs = document.getElementById('save-clubs');
             if (saveClubs) saveClubs.addEventListener('click', async () => {
                 showLoading(true);
-                // Save each club to Supabase
+                let savedCount = 0;
                 for (const [name, c] of Object.entries(clubsData)) {
-                    await sb.from('clubs').upsert({
+                    const { error } = await sb.from('clubs').upsert({
                         name: name,
                         rotary_members: c.rotaryMembers,
                         spouses: c.spouses,
                         rotaract_members: c.rotaractMembers,
                         actual_payment: c.actualPayment
                     }, { onConflict: 'name' });
+                    if (!error) savedCount++;
                 }
                 updateMainBudgetFromClubs();
                 await saveData('rotary-budget', budgetData);
                 await sb.from('activity_logs').insert({
                     log_type: 'club_change',
-                    description: 'Članarine ažurirane',
+                    description: `Članarine ažurirane (${savedCount} klubova)`,
                     user_name: currentUser ? currentUser.name : 'System',
                     user_id: currentUser ? currentUser.id : null
                 });
+                // Reload fresh from DB to confirm
+                const { data: clubRows } = await sb.from('clubs').select('*');
+                if (clubRows) {
+                    clubsData = {};
+                    clubRows.forEach(c => {
+                        clubsData[c.name] = {
+                            rotaryMembers: c.rotary_members || 0,
+                            spouses: c.spouses || 0,
+                            rotaractMembers: c.rotaract_members || 0,
+                            actualPayment: parseFloat(c.actual_payment) || 0
+                        };
+                    });
+                }
+                // Reload prihodi log
+                const { data: prihodiRows } = await sb.from('activity_logs').select('*').in('log_type', ['club_change', 'club_added', 'club_deleted']).order('created_at', { ascending: false }).limit(100);
+                if (prihodiRows) {
+                    prihodiLog = prihodiRows.map(r => ({
+                        timestamp: new Date(r.created_at).toLocaleString('hr-HR'),
+                        user: r.user_name || 'System',
+                        type: r.log_type,
+                        description: r.description,
+                        oldValue: r.old_value,
+                        newValue: r.new_value
+                    }));
+                }
                 showLoading(false);
-                alert('✅ Članarine spremljene!');
+                renderClubs();
+                renderPrihodiLog();
                 renderDashboard();
+                alert(`✅ Članarine spremljene! (${savedCount} klubova)`);
             });
             
             const saveOther = document.getElementById('save-other');
