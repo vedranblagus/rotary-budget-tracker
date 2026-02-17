@@ -1173,41 +1173,36 @@
 
             // Date edit handler for Realizirano tab
             document.querySelectorAll('.realizirano-date-edit').forEach(input => {
-                input.addEventListener('blur', (e) => {
+                input.addEventListener('blur', async (e) => {
                     const id = e.target.dataset.id;
                     const newDate = e.target.value.trim();
                     const trans = transactions.find(t => t.id == id);
-                    
                     if (trans && newDate) {
                         const datePattern = /^\d{1,2}\.\d{1,2}\.\d{4}$/;
                         if (datePattern.test(newDate)) {
                             trans.date = newDate;
-                            await saveData('rotary-transactions', transactions);
+                            await sb.from('transactions').update({ date: newDate }).eq('id', trans.id);
                             renderDashboard();
                             renderTransactions();
-                            console.log('✅ Datum promijenjen:', newDate);
                         } else {
                             alert('Neispravan format datuma! Koristite: DD.MM.YYYY');
                             e.target.value = trans.date;
                         }
                     }
                 });
-                
                 input.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        e.target.blur();
-                    }
+                    if (e.key === 'Enter') e.target.blur();
                 });
             });
 
             // Add event listeners for category changes
             document.querySelectorAll('.realizirano-category-select').forEach(select => {
-                select.addEventListener('change', (e) => {
+                select.addEventListener('change', async (e) => {
                     const id = e.target.dataset.id;
                     const trans = transactions.find(t => t.id == id);
                     if (trans) {
                         trans.category = e.target.value;
-                        await saveData('rotary-transactions', transactions);
+                        await sb.from('transactions').update({ category: e.target.value }).eq('id', trans.id);
                         renderDashboard();
                         renderTransactions();
                     }
@@ -1623,42 +1618,35 @@
 
             // Date edit handler
             document.querySelectorAll('.date-edit').forEach(input => {
-                input.addEventListener('blur', (e) => {
+                input.addEventListener('blur', async (e) => {
                     const id = e.target.dataset.id;
                     const newDate = e.target.value.trim();
                     const trans = transactions.find(t => t.id == id);
-                    
                     if (trans && newDate) {
-                        // Validate date format DD.MM.YYYY
                         const datePattern = /^\d{1,2}\.\d{1,2}\.\d{4}$/;
                         if (datePattern.test(newDate)) {
                             trans.date = newDate;
-                            await saveData('rotary-transactions', transactions);
+                            await sb.from('transactions').update({ date: newDate }).eq('id', trans.id);
                             renderDashboard();
                             renderRealizirano();
-                            console.log('✅ Datum promijenjen:', newDate);
                         } else {
                             alert('Neispravan format datuma! Koristite: DD.MM.YYYY');
-                            e.target.value = trans.date; // Reset to original
+                            e.target.value = trans.date;
                         }
                     }
                 });
-                
-                // Also save on Enter key
                 input.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        e.target.blur(); // Trigger blur event
-                    }
+                    if (e.key === 'Enter') e.target.blur();
                 });
             });
 
             document.querySelectorAll('.category-select').forEach(select => {
-                select.addEventListener('change', (e) => {
+                select.addEventListener('change', async (e) => {
                     const id = e.target.dataset.id;
                     const trans = transactions.find(t => t.id == id);
                     if (trans) {
                         trans.category = e.target.value;
-                        await saveData('rotary-transactions', transactions);
+                        await sb.from('transactions').update({ category: e.target.value }).eq('id', trans.id);
                         renderDashboard();
                     }
                 });
@@ -2125,7 +2113,6 @@
                     
                     // Add to transactions
                     transactions.push(transaction);
-                    await saveData('rotary-transactions', transactions);
                     
                     // Log entry
                     const logEntry = {
