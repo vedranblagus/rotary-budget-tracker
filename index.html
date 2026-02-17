@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rotary District 1913 - Budget Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         .hidden { display: none; }
@@ -91,6 +92,15 @@
     </style>
 </head>
 <body class="bg-gray-50">
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-white bg-opacity-90 flex items-center justify-center z-50">
+        <div class="text-center">
+            <div class="animate-spin rounded-full h-16 w-16 border-b-4 border-yellow-500 mx-auto mb-4"></div>
+            <p class="text-rotary-blue font-semibold text-lg">Učitavanje podataka...</p>
+            <p class="text-gray-500 text-sm mt-1">Spajanje na Supabase bazu</p>
+        </div>
+    </div>
+
     <!-- Login Screen -->
     <div id="login-screen" class="min-h-screen bg-gradient-to-br from-blue-50 via-white to-yellow-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-3xl shadow-2xl p-10 w-full max-w-md">
@@ -663,12 +673,16 @@
             'Odbor za služenje mladima'
         ];
         
-        const MOCK_USERS = [
-            { username: 'admin@rotary1913.org', password: 'admin123', role: 'admin', name: 'Admin' },
-            { username: 'editor@rotary1913.org', password: 'editor123', role: 'editor', name: 'Editor' },
-            { username: 'viewer@rotary1913.org', password: 'viewer123', role: 'viewer', name: 'Viewer' }
-        ];
+        // ==========================================
+        // SUPABASE CONFIGURATION
+        // ==========================================
+        const SUPABASE_URL = 'https://rotary1913.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_BHrhNESd3vZ_XzLH69dHWg_z1y1fskp';
+        const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        // ==========================================
+        // DATA VARIABLES
+        // ==========================================
         let currentUser = null;
         let budgetData = {
             income: Object.fromEntries(INCOME_CATEGORIES.map(cat => [cat, 0])),
@@ -679,8 +693,7 @@
         let charts = {};
         let activityLog = [];
         let pendingBudgetChanges = {};
-        
-        // Prihodi po klubu data
+
         let clubsData = {};
         let otherIncomeData = {
             'Prihodi od donacija RI za pokriće troškova DG': { planned: 0, actual: 0 },
@@ -693,53 +706,196 @@
         let prihodiLog = [];
         let manualEntryLog = [];
 
-        // Load data
-        function loadData() {
-            const budgetStr = localStorage.getItem('rotary-budget');
-            if (budgetStr) budgetData = JSON.parse(budgetStr);
+        // ==========================================
+        // LOADING HELPER
+        // ==========================================
+        function showLoading(show) {
+            const el = document.getElementById('loading-overlay');
+            if (el) el.classList.toggle('hidden', !show);
+        }
 
-            const transStr = localStorage.getItem('rotary-transactions');
-            if (transStr) transactions = JSON.parse(transStr);
+        // ==========================================
+        // LOAD ALL DATA FROM SUPABASE
+        // ==========================================
+        async function loadData() {
+            showLoading(true);
+            try {
+                // 1. Budget
+                const { data: budgetRows } = await sb.from('budget').select('*');
+                if (budgetRows && budgetRows.length > 0) {
+                    budgetRows.forEach(row => {
+                        if (row.type === 'income') budgetData.income[row.category] = parseFloat(row.amount) || 0;
+                        else budgetData.expenses[row.category] = parseFloat(row.amount) || 0;
+                    });
+                }
 
-            const usersStr = localStorage.getItem('rotary-users');
-            if (usersStr) {
-                users = JSON.parse(usersStr);
-            } else {
-                users = MOCK_USERS;
-                localStorage.setItem('rotary-users', JSON.stringify(MOCK_USERS));
+                // 2. Transactions
+                const { data: transRows } = await sb.from('transactions').select('*').order('created_at', { ascending: false });
+                if (transRows) transactions = transRows.map(t => ({
+                    id: t.id,
+                    date: t.date,
+                    description: t.description || '',
+                    type: t.type,
+                    category: t.category || '',
+                    amount: parseFloat(t.amount),
+                    source: t.source || 'manual'
+                }));
+
+                // 3. Users
+                const { data: userRows } = await sb.from('users').select('*');
+                if (userRows) users = userRows;
+
+                // 4. Activity log
+                const { data: logRows } = await sb.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(100);
+                if (logRows) activityLog = logRows.map(l => ({
+                    timestamp: new Date(l.created_at).toLocaleString('hr-HR'),
+                    user: l.user_name || 'System',
+                    action: l.description,
+                    type: l.log_type
+                }));
+
+                // 5. Clubs
+                const { data: clubRows } = await sb.from('clubs').select('*');
+                if (clubRows) {
+                    clubsData = {};
+                    clubRows.forEach(c => {
+                        clubsData[c.name] = {
+                            rotaryMembers: c.rotary_members || 0,
+                            spouses: c.spouses || 0,
+                            rotaractMembers: c.rotaract_members || 0,
+                            actualPayment: parseFloat(c.actual_payment) || 0
+                        };
+                    });
+                }
+
+                // 6. Other income
+                const { data: otherRows } = await sb.from('other_income').select('*');
+                if (otherRows) {
+                    otherRows.forEach(o => {
+                        if (otherIncomeData[o.category] !== undefined) {
+                            otherIncomeData[o.category] = {
+                                planned: parseFloat(o.planned) || 0,
+                                actual: parseFloat(o.actual) || 0
+                            };
+                        }
+                    });
+                }
+
+                // 7. Manual entry log
+                const { data: manualRows } = await sb.from('activity_logs').select('*').eq('log_type', 'manual_entry').order('created_at', { ascending: false }).limit(100);
+                if (manualRows) {
+                    manualEntryLog = manualRows.map(r => {
+                        try { return JSON.parse(r.new_value); } catch(e) { return null; }
+                    }).filter(Boolean);
+                }
+
+                // 8. Prihodi log
+                const { data: prihodiRows } = await sb.from('activity_logs').select('*').in('log_type', ['club_change', 'income_change', 'club_added', 'club_deleted']).order('created_at', { ascending: false }).limit(100);
+                if (prihodiRows) {
+                    prihodiLog = prihodiRows.map(r => ({
+                        timestamp: new Date(r.created_at).toLocaleString('hr-HR'),
+                        user: r.user_name || 'System',
+                        type: r.log_type,
+                        description: r.description,
+                        oldValue: r.old_value,
+                        newValue: r.new_value
+                    }));
+                }
+
+                // Sync budget from clubs
+                updateMainBudgetFromClubs();
+
+                console.log('✅ Data loaded from Supabase');
+            } catch (err) {
+                console.error('❌ Error loading data:', err);
+            } finally {
+                showLoading(false);
             }
-
-            const activityStr = localStorage.getItem('rotary-activity-log');
-            if (activityStr) activityLog = JSON.parse(activityStr);
-            
-            // Load clubs data and always sync budget from clubs
-            loadClubsData();
-            updateMainBudgetFromClubs();
-            
-            loadManualEntryLog();
         }
 
-        // Save data
-        function saveData(key, data) {
-            localStorage.setItem(key, JSON.stringify(data));
+        // ==========================================
+        // SAVE DATA TO SUPABASE
+        // ==========================================
+        async function saveData(key, data) {
+            try {
+                if (key === 'rotary-budget') {
+                    const rows = [
+                        ...INCOME_CATEGORIES.map(cat => ({ category: cat, type: 'income', amount: data.income[cat] || 0, fiscal_year: '2026-2027' })),
+                        ...EXPENSE_CATEGORIES.map(cat => ({ category: cat, type: 'expense', amount: data.expenses[cat] || 0, fiscal_year: '2026-2027' }))
+                    ];
+                    await sb.from('budget').upsert(rows, { onConflict: 'category,type,fiscal_year' });
+
+                } else if (key === 'rotary-transactions') {
+                    for (const t of data) {
+                        await sb.from('transactions').upsert({
+                            id: t.id,
+                            date: t.date,
+                            description: t.description,
+                            type: t.type,
+                            category: t.category,
+                            amount: t.amount,
+                            source: t.source || 'manual'
+                        });
+                    }
+
+                } else if (key === 'rotary-users') {
+                    for (const u of data) {
+                        await sb.from('users').upsert({
+                            id: u.id,
+                            email: u.email,
+                            name: u.name,
+                            role: u.role,
+                            password_hash: u.password_hash || u.password
+                        });
+                    }
+                }
+            } catch (err) {
+                console.error('❌ saveData error for', key, err);
+            }
         }
 
-        // Login
-        document.getElementById('login-form').addEventListener('submit', (e) => {
+        async function logActivity(type, description, oldVal = null, newVal = null) {
+            try {
+                await sb.from('activity_logs').insert({
+                    log_type: type,
+                    description: description,
+                    old_value: oldVal !== null ? String(oldVal) : null,
+                    new_value: newVal !== null ? String(newVal) : null,
+                    user_name: currentUser ? currentUser.name : 'System',
+                    user_id: currentUser ? currentUser.id : null
+                });
+            } catch (err) {
+                console.error('Log error:', err);
+            }
+        }
+
+        // ==========================================
+        // LOGIN
+        // ==========================================
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const email = document.getElementById('login-email').value;
+            const email = document.getElementById('login-email').value.trim();
             const password = document.getElementById('login-password').value;
-            
-            console.log('Login attempt:', email);
-            console.log('Available users:', users);
-            
-            const user = users.find(u => u.username === email && u.password === password);
-            console.log('Found user:', user);
-            
-            if (user) {
-                currentUser = user;
-                showApp();
-            } else {
+
+            showLoading(true);
+            try {
+                const { data: userData } = await sb
+                    .from('users')
+                    .select('*')
+                    .eq('email', email)
+                    .eq('password_hash', password)
+                    .single();
+
+                if (userData) {
+                    currentUser = userData;
+                    await loadData();
+                    showApp();
+                } else {
+                    showLoading(false);
+                    alert('Neispravno korisničko ime ili lozinka');
+                }
+            } catch (err) {
+                showLoading(false);
                 alert('Neispravno korisničko ime ili lozinka');
             }
         });
@@ -762,7 +918,6 @@
 
             // Role-based tab visibility
             if (currentUser.role === 'admin') {
-                // Admin sees everything
                 document.getElementById('budget-tab').classList.remove('hidden');
                 document.getElementById('upload-tab').classList.remove('hidden');
                 document.getElementById('realizirano-tab').classList.remove('hidden');
@@ -770,7 +925,6 @@
                 document.getElementById('users-tab').classList.remove('hidden');
                 document.querySelectorAll('.edit-column').forEach(el => el.classList.remove('hidden'));
             } else if (currentUser.role === 'editor') {
-                // Editor can edit but not manage users
                 document.getElementById('budget-tab').classList.remove('hidden');
                 document.getElementById('upload-tab').classList.remove('hidden');
                 document.getElementById('realizirano-tab').classList.remove('hidden');
@@ -778,29 +932,22 @@
                 document.getElementById('users-tab').classList.add('hidden');
                 document.querySelectorAll('.edit-column').forEach(el => el.classList.remove('hidden'));
             } else if (currentUser.role === 'viewer') {
-                // Viewer only sees Dashboard and Budget (read-only)
                 document.getElementById('budget-tab').classList.remove('hidden');
                 document.getElementById('upload-tab').classList.add('hidden');
                 document.getElementById('realizirano-tab').classList.add('hidden');
                 document.getElementById('prihodi-klubovi-tab').classList.add('hidden');
                 document.getElementById('users-tab').classList.add('hidden');
                 document.querySelectorAll('.edit-column').forEach(el => el.classList.add('hidden'));
-                
-                // Disable budget inputs for viewer
                 setTimeout(() => {
                     document.querySelectorAll('.budget-input').forEach(input => {
                         input.disabled = true;
                         input.classList.add('bg-gray-100', 'cursor-not-allowed');
                     });
                     const saveBtn = document.getElementById('save-budget-btn');
-                    if (saveBtn) {
-                        saveBtn.style.display = 'none';
-                    }
+                    if (saveBtn) saveBtn.style.display = 'none';
                 }, 100);
             }
 
-            loadClubsData();
-            loadManualEntryLog();
             initBudgetInputs();
             renderDashboard();
             renderTransactions();
@@ -902,16 +1049,14 @@
 
         // Save budget changes
         document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('save-budget-btn').addEventListener('click', () => {
+            document.getElementById('save-budget-btn').addEventListener('click', async () => {
                 const changes = [];
                 const timestamp = new Date().toLocaleString('hr-HR');
 
-                // Apply changes and log them
                 for (const type in pendingBudgetChanges) {
                     for (const category in pendingBudgetChanges[type]) {
                         const change = pendingBudgetChanges[type][category];
                         budgetData[type][category] = change.new;
-                        
                         changes.push({
                             timestamp,
                             user: currentUser.name,
@@ -924,25 +1069,32 @@
                 }
 
                 if (changes.length > 0) {
-                    // Add to activity log
+                    showLoading(true);
                     activityLog = [...changes, ...activityLog];
-                    saveData('rotary-activity-log', activityLog);
-                    saveData('rotary-budget', budgetData);
+                    await saveData('rotary-budget', budgetData);
                     
-                    // Reset pending changes
+                    // Log all changes to Supabase
+                    for (const ch of changes) {
+                        await sb.from('activity_logs').insert({
+                            log_type: 'budget_change',
+                            description: `${ch.type} - ${ch.category}`,
+                            old_value: String(ch.oldValue),
+                            new_value: String(ch.newValue),
+                            user_name: currentUser.name,
+                            user_id: currentUser.id
+                        });
+                    }
+
                     pendingBudgetChanges = {};
+                    showLoading(false);
                     
-                    // Update UI
                     const saveBtn = document.getElementById('save-budget-btn');
                     saveBtn.classList.remove('animate-pulse');
                     saveBtn.textContent = '✅ Spremljeno!';
-                    setTimeout(() => {
-                        saveBtn.textContent = '💾 Spremi promjene';
-                    }, 2000);
+                    setTimeout(() => { saveBtn.textContent = '💾 Spremi promjene'; }, 2000);
                     
                     renderActivityLog();
                     renderDashboard();
-                    
                     alert(`Spremljeno ${changes.length} promjena!`);
                 }
             });
@@ -1030,7 +1182,7 @@
                         const datePattern = /^\d{1,2}\.\d{1,2}\.\d{4}$/;
                         if (datePattern.test(newDate)) {
                             trans.date = newDate;
-                            saveData('rotary-transactions', transactions);
+                            await saveData('rotary-transactions', transactions);
                             renderDashboard();
                             renderTransactions();
                             console.log('✅ Datum promijenjen:', newDate);
@@ -1055,7 +1207,7 @@
                     const trans = transactions.find(t => t.id == id);
                     if (trans) {
                         trans.category = e.target.value;
-                        saveData('rotary-transactions', transactions);
+                        await saveData('rotary-transactions', transactions);
                         renderDashboard();
                         renderTransactions();
                     }
@@ -1136,7 +1288,21 @@
             }
 
             transactions = [...transactions, ...newTransactions];
-            saveData('rotary-transactions', transactions);
+            
+            // Bulk insert to Supabase
+            showLoading(true);
+            const insertRows = newTransactions.map(t => ({
+                id: String(t.id),
+                date: t.date,
+                description: t.description,
+                type: t.type,
+                category: t.category,
+                amount: t.amount,
+                source: 'csv'
+            }));
+            await sb.from('transactions').insert(insertRows);
+            showLoading(false);
+            
             alert(`Kategorizacija završena! Dodano ${newTransactions.length} novih transakcija.`);
             renderTransactions();
             renderRealizirano();
@@ -1467,7 +1633,7 @@
                         const datePattern = /^\d{1,2}\.\d{1,2}\.\d{4}$/;
                         if (datePattern.test(newDate)) {
                             trans.date = newDate;
-                            saveData('rotary-transactions', transactions);
+                            await saveData('rotary-transactions', transactions);
                             renderDashboard();
                             renderRealizirano();
                             console.log('✅ Datum promijenjen:', newDate);
@@ -1492,18 +1658,19 @@
                     const trans = transactions.find(t => t.id == id);
                     if (trans) {
                         trans.category = e.target.value;
-                        saveData('rotary-transactions', transactions);
+                        await saveData('rotary-transactions', transactions);
                         renderDashboard();
                     }
                 });
             });
         }
 
-        function deleteTransaction(id) {
+        async function deleteTransaction(id) {
             if (confirm('Obrisati transakciju?')) {
+                await sb.from('transactions').delete().eq('id', id);
                 transactions = transactions.filter(t => t.id != id);
-                saveData('rotary-transactions', transactions);
                 renderTransactions();
+                renderRealizirano();
                 renderDashboard();
             }
         }
@@ -1524,7 +1691,7 @@
                 tbody.innerHTML += `
                     <tr class="hover:bg-gray-50">
                         <td class="px-6 py-4 font-medium">${user.name}</td>
-                        <td class="px-6 py-4 text-gray-600">${user.username}</td>
+                        <td class="px-6 py-4 text-gray-600">${user.email}</td>
                         <td class="px-6 py-4">
                             <span class="px-3 py-1 text-xs rounded-full font-semibold ${
                                 user.role === 'admin' ? 'bg-yellow-100 text-yellow-800' :
@@ -1538,8 +1705,8 @@
                             ${accessDescriptions[user.role]}
                         </td>
                         <td class="px-6 py-4 text-center">
-                            ${user.username !== currentUser.username ? 
-                                `<button onclick="deleteUser('${user.username}')" class="text-red-600 hover:text-red-900 font-bold">✕</button>` : 
+                            ${user.email !== currentUser.email ? 
+                                `<button onclick="deleteUser('${user.id}')" class="text-red-600 hover:text-red-900 font-bold">✕</button>` : 
                                 `<span class="text-gray-400 text-xs">Trenutni korisnik</span>`}
                         </td>
                     </tr>
@@ -1547,10 +1714,10 @@
             });
         }
 
-        function deleteUser(username) {
+        async function deleteUser(userId) {
             if (confirm('Obrisati korisnika?')) {
-                users = users.filter(u => u.username !== username);
-                saveData('rotary-users', users);
+                await sb.from('users').delete().eq('id', userId);
+                users = users.filter(u => u.id !== userId);
                 renderUsers();
             }
         }
@@ -1568,28 +1735,31 @@
         document.addEventListener('DOMContentLoaded', () => {
             const roleSelect = document.getElementById('new-user-role');
             const roleDescription = document.getElementById('role-description');
-            
-            roleSelect.addEventListener('change', (e) => {
+            if (roleSelect) roleSelect.addEventListener('change', (e) => {
                 const descriptions = {
                     viewer: 'Viewer može samo pregledavati Dashboard i Budžet bez mogućnosti uređivanja.',
                     editor: 'Editor može uređivati budžet, uploadati CSV datoteke i kategorizirati transakcije.',
                     admin: 'Admin ima puni pristup svim funkcijama uključujući upravljanje korisnicima.'
                 };
-                roleDescription.textContent = descriptions[e.target.value];
+                if (roleDescription) roleDescription.textContent = descriptions[e.target.value];
             });
         });
 
-        document.getElementById('add-user-form').addEventListener('submit', (e) => {
+        document.getElementById('add-user-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const newUser = {
                 name: document.getElementById('new-user-name').value,
-                username: document.getElementById('new-user-email').value,
-                password: document.getElementById('new-user-password').value,
+                email: document.getElementById('new-user-email').value,
+                password_hash: document.getElementById('new-user-password').value,
                 role: document.getElementById('new-user-role').value
             };
-            users.push(newUser);
-            saveData('rotary-users', users);
-            renderUsers();
+            showLoading(true);
+            const { data, error } = await sb.from('users').insert(newUser).select().single();
+            if (data) {
+                users.push(data);
+                renderUsers();
+            }
+            showLoading(false);
             document.getElementById('user-modal').classList.add('hidden');
             document.getElementById('add-user-form').reset();
         });
@@ -1684,12 +1854,8 @@
         // ===== PRIHOD PO KLUBU FUNCTIONS =====
         
         function loadClubsData() {
-            const c = localStorage.getItem('rotary-clubs-data');
-            if (c) clubsData = JSON.parse(c);
-            const o = localStorage.getItem('rotary-other-income');
-            if (o) otherIncomeData = JSON.parse(o);
-            const l = localStorage.getItem('rotary-prihodi-log');
-            if (l) prihodiLog = JSON.parse(l);
+            // Data already loaded in loadData() from Supabase
+            // This is kept for compatibility but does nothing
         }
 
         function logPrihodActivity(type, item, field, oldVal, newVal) {
@@ -1703,21 +1869,24 @@
             } else if (type === 'other') {
                 desc = `${item} - ${field === 'planned' ? 'Planirano' : 'Realizirano'}`;
             } else if (type === 'club-added') {
-                prihodiLog.unshift({timestamp: ts, user, type, description: `Dodan klub: ${item}`, action: 'Dodano'});
-                localStorage.setItem('rotary-prihodi-log', JSON.stringify(prihodiLog.slice(0, 100)));
+                const entry = {timestamp: ts, user, type, description: `Dodan klub: ${item}`, action: 'Dodano'};
+                prihodiLog.unshift(entry);
+                sb.from('activity_logs').insert({ log_type: 'club_added', description: entry.description, user_name: user, user_id: currentUser?.id || null });
                 return;
             } else if (type === 'club-deleted') {
-                prihodiLog.unshift({timestamp: ts, user, type, description: `Obrisan klub: ${item}`, action: 'Obrisano'});
-                localStorage.setItem('rotary-prihodi-log', JSON.stringify(prihodiLog.slice(0, 100)));
+                const entry = {timestamp: ts, user, type, description: `Obrisan klub: ${item}`, action: 'Obrisano'};
+                prihodiLog.unshift(entry);
+                sb.from('activity_logs').insert({ log_type: 'club_deleted', description: entry.description, user_name: user, user_id: currentUser?.id || null });
                 return;
             }
             
-            prihodiLog.unshift({
+            const entry = {
                 timestamp: ts, user, type, description: desc,
                 oldValue: `€${oldVal.toLocaleString()}`,
                 newValue: `€${newVal.toLocaleString()}`
-            });
-            localStorage.setItem('rotary-prihodi-log', JSON.stringify(prihodiLog.slice(0, 100)));
+            };
+            prihodiLog.unshift(entry);
+            sb.from('activity_logs').insert({ log_type: 'club_change', description: desc, old_value: entry.oldValue, new_value: entry.newValue, user_name: user, user_id: currentUser?.id || null });
             renderPrihodiLog();
         }
 
@@ -1864,8 +2033,7 @@
         // ===== MANUAL ENTRY FUNCTIONS =====
         
         function loadManualEntryLog() {
-            const log = localStorage.getItem('rotary-manual-entry-log');
-            if (log) manualEntryLog = JSON.parse(log);
+            // Data already loaded in loadData() from Supabase
         }
 
         function renderManualEntryLog() {
@@ -1926,7 +2094,7 @@
             
             // Handle form submission
             if (form) {
-                form.addEventListener('submit', (e) => {
+                form.addEventListener('submit', async (e) => {
                     e.preventDefault();
                     
                     const date = document.getElementById('manual-date').value;
@@ -1957,7 +2125,7 @@
                     
                     // Add to transactions
                     transactions.push(transaction);
-                    saveData('rotary-transactions', transactions);
+                    await saveData('rotary-transactions', transactions);
                     
                     // Log entry
                     const logEntry = {
@@ -1970,11 +2138,29 @@
                         description: description || `Ručni unos - ${category}`
                     };
                     
+                    // Save to Supabase
+                    await sb.from('transactions').insert({
+                        id: transaction.id.toString(),
+                        date: transaction.date,
+                        description: transaction.description,
+                        type: transaction.type,
+                        category: transaction.category,
+                        amount: transaction.amount,
+                        source: 'manual'
+                    });
+
+                    // Log entry to Supabase
+                    await sb.from('activity_logs').insert({
+                        log_type: 'manual_entry',
+                        description: logEntry.description,
+                        old_value: null,
+                        new_value: JSON.stringify(logEntry),
+                        user_name: currentUser ? currentUser.name : 'System',
+                        user_id: currentUser ? currentUser.id : null
+                    });
+
                     manualEntryLog.unshift(logEntry);
-                    if (manualEntryLog.length > 100) {
-                        manualEntryLog = manualEntryLog.slice(0, 100);
-                    }
-                    localStorage.setItem('rotary-manual-entry-log', JSON.stringify(manualEntryLog));
+                    if (manualEntryLog.length > 100) manualEntryLog = manualEntryLog.slice(0, 100);
                     
                     // Reset form
                     document.getElementById('manual-amount').value = '';
@@ -1992,9 +2178,15 @@
             }
         }
 
-        function delClub(n) {
+        async function delClub(n) {
             if (confirm('Obrisati "' + n + '"?')) {
-                logPrihodActivity('club-deleted', n);
+                await sb.from('clubs').delete().eq('name', n);
+                await sb.from('activity_logs').insert({
+                    log_type: 'club_deleted',
+                    description: `Klub "${n}" obrisan`,
+                    user_name: currentUser ? currentUser.name : 'System',
+                    user_id: currentUser ? currentUser.id : null
+                });
                 delete clubsData[n];
                 renderClubs();
             }
@@ -2003,68 +2195,76 @@
         // Add club button and save buttons
         document.addEventListener('DOMContentLoaded', () => {
             const addBtn = document.getElementById('add-club-btn');
-            if (addBtn) addBtn.addEventListener('click', () => {
+            if (addBtn) addBtn.addEventListener('click', async () => {
                 const n = prompt('Naziv kluba (npr. RC Zagreb, Rotaract Split):');
                 if (n && n.trim()) {
-                    if (clubsData[n.trim()]) {alert('Klub već postoji!'); return;}
-                    clubsData[n.trim()] = {rotaryMembers: 0, spouses: 0, rotaractMembers: 0, actualPayment: 0};
-                    logPrihodActivity('club-added', n.trim());
+                    if (clubsData[n.trim()]) { alert('Klub već postoji!'); return; }
+                    clubsData[n.trim()] = { rotaryMembers: 0, spouses: 0, rotaractMembers: 0, actualPayment: 0 };
+                    await sb.from('clubs').insert({ name: n.trim(), rotary_members: 0, spouses: 0, rotaract_members: 0, actual_payment: 0 });
+                    await sb.from('activity_logs').insert({
+                        log_type: 'club_added',
+                        description: `Klub "${n.trim()}" dodan`,
+                        user_name: currentUser ? currentUser.name : 'System',
+                        user_id: currentUser ? currentUser.id : null
+                    });
                     renderClubs();
                 }
             });
             
             const saveClubs = document.getElementById('save-clubs');
-            if (saveClubs) saveClubs.addEventListener('click', () => {
-                localStorage.setItem('rotary-clubs-data', JSON.stringify(clubsData));
+            if (saveClubs) saveClubs.addEventListener('click', async () => {
+                showLoading(true);
+                // Save each club to Supabase
+                for (const [name, c] of Object.entries(clubsData)) {
+                    await sb.from('clubs').upsert({
+                        name: name,
+                        rotary_members: c.rotaryMembers,
+                        spouses: c.spouses,
+                        rotaract_members: c.rotaractMembers,
+                        actual_payment: c.actualPayment
+                    }, { onConflict: 'name' });
+                }
                 updateMainBudgetFromClubs();
+                await saveData('rotary-budget', budgetData);
+                await sb.from('activity_logs').insert({
+                    log_type: 'club_change',
+                    description: 'Članarine ažurirane',
+                    user_name: currentUser ? currentUser.name : 'System',
+                    user_id: currentUser ? currentUser.id : null
+                });
+                showLoading(false);
                 alert('✅ Članarine spremljene!');
                 renderDashboard();
             });
             
             const saveOther = document.getElementById('save-other');
-            if (saveOther) saveOther.addEventListener('click', () => {
-                localStorage.setItem('rotary-other-income', JSON.stringify(otherIncomeData));
+            if (saveOther) saveOther.addEventListener('click', async () => {
+                showLoading(true);
+                // Save each other income to Supabase
+                for (const [category, vals] of Object.entries(otherIncomeData)) {
+                    await sb.from('other_income').upsert({
+                        category: category,
+                        planned: vals.planned,
+                        actual: vals.actual
+                    }, { onConflict: 'category' });
+                }
                 updateMainBudgetFromClubs();
+                await saveData('rotary-budget', budgetData);
+                await sb.from('activity_logs').insert({
+                    log_type: 'income_change',
+                    description: 'Ostali prihodi ažurirani',
+                    user_name: currentUser ? currentUser.name : 'System',
+                    user_id: currentUser ? currentUser.id : null
+                });
+                showLoading(false);
                 alert('✅ Ostali prihodi spremljeni!');
                 renderDashboard();
             });
         });
 
         // Initialize
-        
-        // One-time data reset (version check)
-        const APP_VERSION = '2.0';
-        const currentVersion = localStorage.getItem('rotary-app-version');
-        
-        if (currentVersion !== APP_VERSION) {
-            console.log('🔄 Resetiranje podataka za verziju ' + APP_VERSION);
-            
-            // Reset budget to zeros
-            const freshBudget = {
-                income: Object.fromEntries(INCOME_CATEGORIES.map(cat => [cat, 0])),
-                expenses: Object.fromEntries(EXPENSE_CATEGORIES.map(cat => [cat, 0]))
-            };
-            localStorage.setItem('rotary-budget', JSON.stringify(freshBudget));
-            
-            // Keep clubs and other income data if they exist
-            // But reset if you want complete clean slate, uncomment:
-            // localStorage.removeItem('rotary-clubs-data');
-            // localStorage.removeItem('rotary-other-income');
-            // localStorage.removeItem('rotary-prihodi-log');
-            // localStorage.removeItem('rotary-manual-entry-log');
-            
-            // Mark as migrated
-            localStorage.setItem('rotary-app-version', APP_VERSION);
-            console.log('✅ Reset završen. Verzija ažurirana na ' + APP_VERSION);
-            
-            // Show notification to user
-            setTimeout(() => {
-                alert('📊 Sustav ažuriran!\n\nSvi budžeti su resetirani na 0.\nSada koristite tab "Prihod po klubu" za unos prihoda.\n\nVerzija: ' + APP_VERSION);
-            }, 1000);
-        }
-        
-        loadData();
-        console.log('App initialized. Users loaded:', users.length);
+        console.log('🚀 Rotary District 1913 Budget Tracker - Supabase Version');
+        console.log('🌐 Cloud storage:', SUPABASE_URL);
     </script>
 </body>
 </html>
