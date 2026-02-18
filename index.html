@@ -1259,7 +1259,12 @@
         // Helper: parse Excel date serial to DD.MM.YYYY
         function excelDateToString(serial) {
             if (!serial) return '';
-            if (typeof serial === 'string' && serial.includes('.')) return serial.trim();
+            if (typeof serial === 'string' && serial.includes('.')) {
+                // String datum - provjeri format
+                const trimmed = serial.trim();
+                console.log('📅 String datum iz Excel-a:', trimmed);
+                return trimmed;
+            }
             // Excel date serial
             const utc_days = Math.floor(serial - 25569);
             const utc_value = utc_days * 86400;
@@ -1267,7 +1272,9 @@
             const d = String(date.getUTCDate()).padStart(2, '0');
             const m = String(date.getUTCMonth() + 1).padStart(2, '0');
             const y = date.getUTCFullYear();
-            return `${d}.${m}.${y}`;
+            const result = `${d}.${m}.${y}`;
+            console.log('📅 Serial datum iz Excel-a:', serial, '→', result);
+            return result;
         }
 
         // Helper: extract month label from DD.MM.YYYY
@@ -1730,7 +1737,9 @@
             if (parts.length < 3) return '—';
             const month = parts[1].padStart(2, '0');
             const year = parts[2];
-            return `${month}/${year}`;
+            const result = `${month}/${year}`;
+            console.log('📆 dateToPeriod:', dateStr, '→ parts:', parts, '→ result:', result);
+            return result;
         }
 
         // Log promjena na transakcijama
