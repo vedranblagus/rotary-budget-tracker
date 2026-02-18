@@ -1370,6 +1370,16 @@
                     const cellE = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 4 })]; // Expense
                     const cellF = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 5 })]; // Income
 
+                    // ULTRA DEBUG za prvih 10 redova
+                    if (rowNum < 10) {
+                        console.log(`\n🔍 RED ${rowNum} ULTRA DEBUG:`);
+                        console.log('  cellA:', cellA);
+                        console.log('  cellA.t (type):', cellA?.t);
+                        console.log('  cellA.v (value):', cellA?.v, typeof cellA?.v);
+                        console.log('  cellA.w (formatted):', cellA?.w);
+                        console.log('  cellA.z (format):', cellA?.z);
+                    }
+
                     if (!cellA) {
                         skippedNoCellA++;
                         continue;
