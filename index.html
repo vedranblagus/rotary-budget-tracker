@@ -838,6 +838,8 @@
                 updateMainBudgetFromClubs();
 
                 console.log('✅ Data loaded from Supabase');
+                console.log('📊 Loaded clubs:', Object.keys(clubsData).length, clubsData);
+                console.log('💰 Loaded transactions:', transactions.length);
             } catch (err) {
                 console.error('❌ Error loading data:', err);
             } finally {
@@ -1019,6 +1021,8 @@
                 document.getElementById(`tab-${tabName}`).classList.remove('hidden');
 
                 if (tabName === 'dashboard') renderDashboard();
+                if (tabName === 'prihodi-klubovi') renderClubs();
+                if (tabName === 'transactions') renderTransactions();
             });
         });
 
@@ -1143,20 +1147,19 @@
         // Render Activity Log
         function renderActivityLog() {
             const logContainer = document.getElementById('budget-activity-log');
+            if (!logContainer) return;
+            
             if (activityLog.length === 0) {
                 logContainer.innerHTML = '<p class="text-sm text-gray-500 italic">Još nema zabilježenih promjena...</p>';
                 return;
             }
 
             logContainer.innerHTML = activityLog.slice(0, 20).map(log => `
-                <div class="mb-3 p-3 bg-white rounded border-l-4 ${log.type === 'Prihod' ? 'border-green-500' : 'border-red-500'}">
+                <div class="mb-3 p-3 bg-white rounded border-l-4 border-blue-400">
                     <div class="flex justify-between items-start">
-                        <div>
-                            <p class="text-sm font-semibold text-gray-800">${log.category}</p>
-                            <p class="text-xs text-gray-600">${log.type}</p>
-                        </div>
-                        <div class="text-right">
-                            <p class="text-sm"><span class="text-gray-400">€${log.oldValue.toLocaleString()}</span> → <span class="font-semibold text-rotary-gold">€${log.newValue.toLocaleString()}</span></p>
+                        <div class="flex-1">
+                            <p class="text-sm font-semibold text-gray-800">${log.action || log.description || 'Promjena'}</p>
+                            <p class="text-xs text-gray-500 mt-1">${log.type || log.log_type || ''}</p>
                         </div>
                     </div>
                     <div class="mt-2 text-xs text-gray-500">
@@ -2152,11 +2155,13 @@
                 c.innerHTML = '<p class="text-sm text-gray-500 italic text-center py-8">Još nema zabilježenih promjena...</p>';
                 return;
             }
-            c.innerHTML = prihodiLog.map(log => `
+            c.innerHTML = prihodiLog.map(log => {
+                const logType = log.type || log.log_type || '';
+                return `
                 <div class="mb-3 p-4 bg-white rounded-lg border-l-4 ${
-                    log.type === 'club' ? 'border-blue-500' : 
-                    log.type === 'other' ? 'border-green-500' :
-                    log.type === 'club-added' ? 'border-purple-500' : 'border-red-500'
+                    logType === 'club' || logType === 'club_change' ? 'border-blue-500' : 
+                    logType === 'other' || logType === 'income_change' ? 'border-green-500' :
+                    logType === 'club-added' || logType === 'club_added' ? 'border-purple-500' : 'border-red-500'
                 } shadow-sm">
                     <div class="flex justify-between items-start mb-2">
                         <div class="flex-1">
@@ -2164,16 +2169,18 @@
                             ${log.oldValue ? `<p class="text-sm text-gray-600 mt-1">${log.oldValue} → ${log.newValue}</p>` : ''}
                         </div>
                         <span class="text-xs px-2 py-1 rounded ${
-                            log.type === 'club' ? 'bg-blue-100 text-blue-800' :
-                            log.type === 'other' ? 'bg-green-100 text-green-800' :
-                            log.type === 'club-added' ? 'bg-purple-100 text-purple-800' : 'bg-red-100 text-red-800'
+                            logType === 'club' || logType === 'club_change' ? 'bg-blue-100 text-blue-800' :
+                            logType === 'other' || logType === 'income_change' ? 'bg-green-100 text-green-800' :
+                            logType === 'club-added' || logType === 'club_added' ? 'bg-purple-100 text-purple-800' : 'bg-red-100 text-red-800'
                         }">
-                            ${log.type === 'club' ? '👥 Klub' : log.type === 'other' ? '💰 Prihod' : log.type === 'club-added' ? '➕ Dodano' : '🗑️ Obrisano'}
+                            ${logType.includes('club') && !logType.includes('deleted') ? '👥 Klub' : 
+                              logType.includes('income') || logType === 'other' ? '💰 Prihod' : 
+                              logType.includes('added') ? '➕ Dodano' : '🗑️ Obrisano'}
                         </span>
                     </div>
                     <div class="text-xs text-gray-500 mt-2"><span class="font-medium">${log.user}</span> • ${log.timestamp}</div>
                 </div>
-            `).join('');
+            `}).join('');
         }
 
         function updateMainBudgetFromClubs() {
@@ -2192,11 +2199,16 @@
         }
 
         function renderClubs() {
+            console.log('🏢 renderClubs called, clubsData:', clubsData);
             const tb = document.getElementById('clubs-tbody');
-            if (!tb) return;
+            if (!tb) {
+                console.log('❌ clubs-tbody element not found!');
+                return;
+            }
             tb.innerHTML = '';
             let tR = 0, tS = 0, tRa = 0, tP = 0, tA = 0;
             const names = Object.keys(clubsData).sort();
+            console.log('📋 Club names:', names);
             
             if (names.length === 0) {
                 tb.innerHTML = '<tr><td colspan="8" class="px-4 py-12 text-center text-gray-500">Nema klubova. Kliknite "+ Dodaj klub"</td></tr>';
@@ -2437,7 +2449,22 @@
                         user_name: currentUser ? currentUser.name : 'System',
                         user_id: currentUser ? currentUser.id : null
                     });
+                    
+                    // Osvježi log
+                    const { data: prihodiRows } = await sb.from('activity_logs').select('*').in('log_type', ['club_change', 'club_added', 'club_deleted', 'income_change']).order('created_at', { ascending: false }).limit(100);
+                    if (prihodiRows) {
+                        prihodiLog = prihodiRows.map(r => ({
+                            timestamp: new Date(r.created_at).toLocaleString('hr-HR'),
+                            user: r.user_name || 'System',
+                            type: r.log_type,
+                            description: r.description,
+                            oldValue: r.old_value,
+                            newValue: r.new_value
+                        }));
+                    }
+                    
                     renderClubs();
+                    renderPrihodiLog();
                 }
             });
             
