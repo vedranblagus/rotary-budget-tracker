@@ -1372,18 +1372,22 @@
                             trimmed = trimmed.slice(0, -1);
                         }
                         
-                        // Hrvatski DD.MM.YYYY
+                        // Hrvatski DD.MM.YYYY (s ili bez točke na kraju)
                         if (trimmed.match(/^\d{1,2}\.\d{1,2}\.\d{4}$/)) {
-                            dateStr = trimmed;
+                            const parts = trimmed.split('.');
+                            const day = parts[0].padStart(2, '0');
+                            const month = parts[1].padStart(2, '0');
+                            const year = parts[2];
+                            dateStr = `${day}.${month}.${year}`;
                         }
                         // Američki M/D/YY ili M/D/YYYY
                         else if (trimmed.match(/^\d{1,2}\/\d{1,2}\/\d{2,4}$/)) {
                             const p = trimmed.split('/');
-                            const month = p[0].padStart(2, '0');  // M → MM (MJESEC je PRVI!)
+                            const month = p[0].padStart(2, '0');  // M → MM (MJESEC je PRVI u američkom formatu!)
                             const day = p[1].padStart(2, '0');    // D → DD (DAN je DRUGI!)
                             let year = p[2];
                             if (year.length === 2) year = (parseInt(year) < 50 ? '20' : '19') + year;
-                            // KRITIČNO: Američki format je M/D/Y, pa je dan=p[1], mjesec=p[0]
+                            // Američki format je M/D/Y, pa pretvaramo u hrvatski DD.MM.YYYY
                             dateStr = `${day}.${month}.${year}`;
                         }
                     } else if (typeof rawDate === 'number') {
