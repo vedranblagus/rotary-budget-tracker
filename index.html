@@ -1423,7 +1423,7 @@
 
                     // Privremeni ID samo za UI - NE šalje se u bazu
                     newTransactions.push({
-                        tempId: `temp-${Date.now()}-${i}`,
+                        tempId: `temp-${Date.now()}-${rowNum}`,
                         date: dateStr,
                         month: month,
                         description: fullDesc,
@@ -1531,8 +1531,11 @@
 
             } catch (err) {
                 progress.classList.add('hidden');
-                console.error('Upload error:', err);
-                alert('Greška pri čitanju datoteke: ' + err.message);
+                console.error('❌ Upload error - full object:', err);
+                console.error('❌ Error type:', typeof err);
+                console.error('❌ Error message:', err?.message);
+                console.error('❌ Error stack:', err?.stack);
+                alert('Greška pri čitanju datoteke: ' + (err?.message || String(err) || 'Nepoznata greška'));
             }
 
             e.target.value = ''; // Reset file input
