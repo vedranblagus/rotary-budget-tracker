@@ -1337,126 +1337,68 @@
                 const arrayBuffer = await file.arrayBuffer();
                 
                 console.log('🔵 2. Parsiram XLSX...');
-                // VAŽNO: cellDates: false i raw: false sprječavaju automatsku konverziju datuma
-                const workbook = XLSX.read(arrayBuffer, { 
-                    type: 'array', 
-                    cellDates: false,
-                    raw: false  // Ne pretvori datume u brojeve
-                });
-                
-                console.log('🔵 3. Dohvaćam sheet...');
+                const workbook = XLSX.read(arrayBuffer, { type: 'array' });
                 const sheet = workbook.Sheets[workbook.SheetNames[0]];
-                
-                console.log('🔵 4. Decode range...');
-                // Nađi range
-                const range = XLSX.utils.decode_range(sheet['!ref']);
-                
-                console.log('🔵 5. Range decoded:', range);
-                progressText.textContent = `Pronađeno ${range.e.r + 1} redaka. Filtriram transakcije...`;
+                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+                console.log('🔵 3. Pronađeno redova:', rows.length);
+                progressText.textContent = `Pronađeno ${rows.length} redaka. Filtriram transakcije...`;
 
                 const newTransactions = [];
                 const skippedDuplicates = [];
-                let skippedNoCellA = 0;
-                let skippedNoAmount = 0;
-                let skippedBadDate = 0;
 
-                console.log('🔵 6. Pocinjem iteraciju kroz redove...');
-                // Iteriraj kroz sve redove
-                for (let rowNum = range.s.r; rowNum <= range.e.r; rowNum++) {
-                    // Čitaj raw vrijednosti iz ćelija
-                    const cellA = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 0 })]; // Datum
-                    const cellC = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 2 })]; // User
-                    const cellD = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 3 })]; // Description
-                    const cellE = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 4 })]; // Expense
-                    const cellF = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 5 })]; // Income
+                console.log('🔵 4. Pocinjem iteraciju kroz redove...');
+                for (let i = 0; i < rows.length; i++) {
+                    const row = rows[i];
+                    if (!row || row.length < 5) continue;
 
-                    // ULTRA DEBUG za prvih 10 redova
-                    if (rowNum < 10) {
-                        console.log(`\n🔍 RED ${rowNum} ULTRA DEBUG:`);
-                        console.log('  cellA:', cellA);
-                        console.log('  cellA.t (type):', cellA?.t);
-                        console.log('  cellA.v (value):', cellA?.v, typeof cellA?.v);
-                        console.log('  cellA.w (formatted):', cellA?.w);
-                        console.log('  cellA.z (format):', cellA?.z);
-                    }
-
-                    if (!cellA) {
-                        skippedNoCellA++;
-                        continue;
-                    }
-
-                    // KRITIČNO: Uvijek čitaj .w (formatted text) prvo, pa tek onda .v
-                    let rawDate = cellA.w || cellA.v;
-                    
-                    // Ako je JavaScript Date objekt (što se dešava kod CSV-a), NE koristi ga - već pokušaj iz .w
-                    if (rawDate instanceof Date) {
-                        rawDate = cellA.w || null;
-                    }
-                    
-                    const user = cellC ? String(cellC.v || '').trim() : '';
-                    const desc = cellD ? String(cellD.v || '').trim() : '';
-                    const expenseVal = cellE ? (parseFloat(String(cellE.v).replace(',', '.')) || 0) : 0;
-                    const incomeVal = cellF ? (parseFloat(String(cellF.v).replace(',', '.')) || 0) : 0;
+                    // Column A = date, C = user, D = description, E = expense, F = income
+                    const rawDate = row[0];
+                    const user = String(row[2] || '').trim();
+                    const desc = String(row[3] || '').trim();
+                    const expenseVal = parseFloat(String(row[4]).replace(',', '.')) || 0;
+                    const incomeVal = parseFloat(String(row[5]).replace(',', '.')) || 0;
 
                     // Skip header rows and empty rows
-                    if (!rawDate || (!expenseVal && !incomeVal)) {
-                        skippedNoAmount++;
-                        continue;
-                    }
+                    if (!rawDate || (!expenseVal && !incomeVal)) continue;
                     
-                    // Parsiranje datuma - PODRŽAVA i DD.MM.YYYY i M/D/YY format
+                    // Format date - sada podržava i američki i hrvatski format
                     let dateStr = '';
-                    
                     if (typeof rawDate === 'string') {
                         const trimmed = rawDate.trim();
-                        
-                        // Provjeri DD.MM.YYYY format (hrvatski)
+                        // Hrvatski DD.MM.YYYY
                         if (trimmed.match(/^\d{1,2}\.\d{1,2}\.\d{4}$/)) {
                             dateStr = trimmed;
-                            console.log(`✅ Red ${rowNum}: datum = "${dateStr}" (OK - hrvatski format)`);
-                        } 
-                        // Provjeri M/D/YY ili M/D/YYYY format (američki)
-                        else if (trimmed.match(/^\d{1,2}\/\d{1,2}\/\d{2,4}$/)) {
-                            const parts = trimmed.split('/');
-                            const month = parts[0].padStart(2, '0');  // M → MM
-                            const day = parts[1].padStart(2, '0');    // D → DD
-                            let year = parts[2];
-                            
-                            // Ako je 2-znamenkasta godina, pretvori u 4-znamenkastu
-                            if (year.length === 2) {
-                                year = (parseInt(year) < 50 ? '20' : '19') + year;
-                            }
-                            
-                            dateStr = `${day}.${month}.${year}`;
-                            console.log(`✅ Red ${rowNum}: datum = "${trimmed}" → "${dateStr}" (konvertiran iz američkog formata)`);
                         }
-                        else {
-                            console.log(`⚠️ Red ${rowNum}: krivi format datuma = "${trimmed}"`);
-                            skippedBadDate++;
-                            continue;
+                        // Američki M/D/YY ili M/D/YYYY
+                        else if (trimmed.match(/^\d{1,2}\/\d{1,2}\/\d{2,4}$/)) {
+                            const p = trimmed.split('/');
+                            const day = p[1].padStart(2, '0');
+                            const month = p[0].padStart(2, '0');
+                            let year = p[2];
+                            if (year.length === 2) year = (parseInt(year) < 50 ? '20' : '19') + year;
+                            dateStr = `${day}.${month}.${year}`;
                         }
                     } else if (typeof rawDate === 'number') {
-                        // Excel serial date - konvertuj
+                        // Excel serial date
                         dateStr = excelDateToString(rawDate);
-                        console.log(`🔢 Red ${rowNum}: serial ${rawDate} → "${dateStr}"`);
-                    } else {
-                        console.log(`❌ Red ${rowNum}: neprepoznat tip datuma =`, rawDate, typeof rawDate);
-                        skippedBadDate++;
-                        continue;
+                    } else if (rawDate instanceof Date) {
+                        const d = String(rawDate.getDate()).padStart(2, '0');
+                        const m = String(rawDate.getMonth() + 1).padStart(2, '0');
+                        const y = rawDate.getFullYear();
+                        dateStr = `${d}.${m}.${y}`;
                     }
                     
-                    if (!dateStr || !dateStr.match(/\d{1,2}\.\d{1,2}\.\d{4}/)) {
-                        console.log(`❌ Red ${rowNum}: finalna provjera nije prošla, dateStr = "${dateStr}"`);
-                        skippedBadDate++;
-                        continue;
-                    }
+                    if (!dateStr || !dateStr.match(/^\d{1,2}\.\d{1,2}\.\d{4}$/)) continue;
+
+                    if (!dateStr || !dateStr.match(/^\d{1,2}\.\d{1,2}\.\d{4}$/)) continue;
 
                     const amount = incomeVal > 0 ? incomeVal : -expenseVal;
                     const type = incomeVal > 0 ? 'income' : 'expense';
                     const fullDesc = [user, desc].filter(Boolean).join(' - ');
                     const month = dateToMonth(dateStr);
 
-                    // Check duplicate: same date + same description + same amount
+                    // Check duplicate
                     const isDuplicate = transactions.some(t =>
                         t.date === dateStr &&
                         t.description === fullDesc &&
@@ -1468,9 +1410,8 @@
                         continue;
                     }
 
-                    // Privremeni ID samo za UI - NE šalje se u bazu
                     newTransactions.push({
-                        tempId: `temp-${Date.now()}-${rowNum}`,
+                        tempId: `temp-${Date.now()}-${i}`,
                         date: dateStr,
                         month: month,
                         description: fullDesc,
@@ -1484,14 +1425,9 @@
                 }
 
                 console.log('📊 STATISTIKA PARSIRANJA:');
-                console.log(`   Total redova u CSV-u: ${range.e.r + 1}`);
+                console.log(`   Total redova: ${rows.length}`);
                 console.log(`   ✅ Nove transakcije: ${newTransactions.length}`);
-                console.log(`   ⏭️ Duplikati preskočeni: ${skippedDuplicates.length}`);
-                console.log(`   ❌ Preskočeno - nema cellA: ${skippedNoCellA}`);
-                console.log(`   ❌ Preskočeno - nema iznosa: ${skippedNoAmount}`);
-                console.log(`   ❌ Preskočeno - loš datum: ${skippedBadDate}`);
-                console.log(`   📝 Total preskočeno: ${skippedNoCellA + skippedNoAmount + skippedBadDate + skippedDuplicates.length}`);
-                console.log(`   ✔️ Provjera: ${newTransactions.length} + ${skippedNoCellA + skippedNoAmount + skippedBadDate + skippedDuplicates.length} = ${newTransactions.length + skippedNoCellA + skippedNoAmount + skippedBadDate + skippedDuplicates.length} od ${range.e.r + 1}`);
+                console.log(`   ⏭️ Duplikati: ${skippedDuplicates.length}`);
 
                 if (newTransactions.length === 0) {
                     progress.classList.add('hidden');
