@@ -1352,63 +1352,37 @@
                     const row = rows[i];
                     if (!row || row.length < 5) continue;
 
-                    // Column A = date, C = user, D = description, E = expense, F = income
-                    const rawDate = row[0];
+                    let rawDate = String(row[0] || '').trim();
                     const user = String(row[2] || '').trim();
                     const desc = String(row[3] || '').trim();
                     const expenseVal = parseFloat(String(row[4]).replace(',', '.')) || 0;
                     const incomeVal = parseFloat(String(row[5]).replace(',', '.')) || 0;
 
-                    // Skip header rows and empty rows
+                    // Skip ako nema datuma ili iznosa
                     if (!rawDate || (!expenseVal && !incomeVal)) continue;
                     
-                    // Format date - sada podržava i američki i hrvatski format
-                    let dateStr = '';
-                    if (typeof rawDate === 'string') {
-                        let trimmed = rawDate.trim();
-                        
-                        // Ukloni točku na kraju ako postoji (24.09.2025. → 24.09.2025)
-                        if (trimmed.endsWith('.')) {
-                            trimmed = trimmed.slice(0, -1);
-                        }
-                        
-                        // Hrvatski DD.MM.YYYY (s ili bez točke na kraju)
-                        if (trimmed.match(/^\d{1,2}\.\d{1,2}\.\d{4}$/)) {
-                            const parts = trimmed.split('.');
-                            const day = parts[0].padStart(2, '0');
-                            const month = parts[1].padStart(2, '0');
-                            const year = parts[2];
-                            dateStr = `${day}.${month}.${year}`;
-                        }
-                        // Format sa kosom crtom: D/M/YY ili D/M/YYYY (HRVATSKI format!)
-                        else if (trimmed.match(/^\d{1,2}\/\d{1,2}\/\d{2,4}$/)) {
-                            const p = trimmed.split('/');
-                            const day = p[0].padStart(2, '0');      // D → DD (DAN je PRVI u hrvatskom formatu!)
-                            const month = p[1].padStart(2, '0');    // M → MM (MJESEC je DRUGI!)
-                            let year = p[2];
-                            if (year.length === 2) year = (parseInt(year) < 50 ? '20' : '19') + year;
-                            // Hrvatski format D/M/Y, pretvaramo u DD.MM.YYYY
-                            dateStr = `${day}.${month}.${year}`;
-                            console.log(`🔄 Red ${i}: hrvatski slash "${trimmed}" → točkasti "${dateStr}" (dan=${day}, mjesec=${month})`);
-                        }
-                    } else if (typeof rawDate === 'number') {
-                        // Excel serial date
-                        dateStr = excelDateToString(rawDate);
-                    } else if (rawDate instanceof Date) {
-                        const d = String(rawDate.getDate()).padStart(2, '0');
-                        const m = String(rawDate.getMonth() + 1).padStart(2, '0');
-                        const y = rawDate.getFullYear();
-                        dateStr = `${d}.${m}.${y}`;
-                    }
+                    // Ukloni točku na kraju ako postoji
+                    if (rawDate.endsWith('.')) rawDate = rawDate.slice(0, -1);
                     
-                    if (!dateStr || !dateStr.match(/^\d{1,2}\.\d{1,2}\.\d{4}$/)) continue;
+                    // Provjeri da li je DD.MM.YYYY format
+                    if (!rawDate.match(/^\d{1,2}\.\d{1,2}\.\d{4}$/)) {
+                        console.log(`⚠️ Red ${i}: preskačem - krivi format "${rawDate}"`);
+                        continue;
+                    }
 
-                    if (!dateStr || !dateStr.match(/^\d{1,2}\.\d{1,2}\.\d{4}$/)) continue;
+                    // Normaliziraj format (dodaj leading zeros) i izvuci mjesec
+                    const parts = rawDate.split('.');
+                    const day = parts[0].padStart(2, '0');
+                    const month = parts[1].padStart(2, '0');
+                    const year = parts[2];
+                    const dateStr = `${day}.${month}.${year}`;
+                    const monthStr = `${month}/${year}`;
+
+                    console.log(`✅ Red ${i}: datum="${dateStr}", mjesec="${monthStr}"`);
 
                     const amount = incomeVal > 0 ? incomeVal : -expenseVal;
                     const type = incomeVal > 0 ? 'income' : 'expense';
                     const fullDesc = [user, desc].filter(Boolean).join(' - ');
-                    const month = dateToMonth(dateStr);
 
                     // Check duplicate
                     const isDuplicate = transactions.some(t =>
@@ -1425,7 +1399,7 @@
                     newTransactions.push({
                         tempId: `temp-${Date.now()}-${i}`,
                         date: dateStr,
-                        month: month,
+                        month: monthStr,
                         description: fullDesc,
                         user: user,
                         type: type,
@@ -1436,10 +1410,7 @@
                     });
                 }
 
-                console.log('📊 STATISTIKA PARSIRANJA:');
-                console.log(`   Total redova: ${rows.length}`);
-                console.log(`   ✅ Nove transakcije: ${newTransactions.length}`);
-                console.log(`   ⏭️ Duplikati: ${skippedDuplicates.length}`);
+                console.log('📊 Učitano:', newTransactions.length, 'transakcija, duplikata:', skippedDuplicates.length);
 
                 if (newTransactions.length === 0) {
                     progress.classList.add('hidden');
@@ -1826,11 +1797,9 @@
             if (!dateStr) return '—';
             const parts = dateStr.split('.');
             if (parts.length < 3) return '—';
-            const first = parts[0].padStart(2, '0');  // PRVI dio (dan)
+            const month = parts[1].padStart(2, '0');  // DRUGI dio = MJESEC
             const year = parts[2];
-            const result = `${first}/${year}`;
-            console.log('📆 dateToPeriod:', dateStr, '→ parts:', parts, '→ result:', result);
-            return result;
+            return `${month}/${year}`;
         }
 
         // Log promjena na transakcijama
