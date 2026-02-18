@@ -330,6 +330,7 @@
                                 <thead class="bg-gray-100">
                                     <tr>
                                         <th class="px-4 py-3 text-left text-xs font-bold uppercase">Klub</th>
+                                        <th class="px-4 py-3 text-center text-xs font-bold uppercase">Polugodište</th>
                                         <th class="px-4 py-3 text-center text-xs font-bold uppercase">Rotary</th>
                                         <th class="px-4 py-3 text-center text-xs font-bold uppercase">Supružnici</th>
                                         <th class="px-4 py-3 text-center text-xs font-bold uppercase">Rotaract</th>
@@ -730,7 +731,7 @@
         let activityLog = [];
         let pendingBudgetChanges = {};
 
-        let clubsData = {};
+        let clubsData = {};  // Format: { "RC Zagreb - P1": { rotaryMembers, spouses, rotaractMembers, actualPayment }, "RC Zagreb - P2": {...} }
         let otherIncomeData = {
             'Prihodi od donacija RI za pokriće troškova DG': { planned: 0, actual: 0 },
             'Prihodi od kotizacija za YE, Rotary kamp, RYLA': { planned: 0, actual: 0 },
@@ -800,7 +801,9 @@
                 if (clubRows) {
                     clubsData = {};
                     clubRows.forEach(c => {
-                        clubsData[c.name] = {
+                        const period = c.polugodiste || 'P1';  // Fallback za stare podatke
+                        const key = `${c.name} - ${period}`;
+                        clubsData[key] = {
                             rotaryMembers: c.rotary_members || 0,
                             spouses: c.spouses || 0,
                             rotaractMembers: c.rotaract_members || 0,
@@ -1954,17 +1957,42 @@
                     ? '<span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">📊 XLS/CSV</span>'
                     : '<span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">✍️ Ručno</span>';
 
-                // Dropdown za klub - samo za prihode
-                const clubNames = Object.keys(clubsData).sort();
+                // Dropdown za klub i polugodište - samo za prihode
+                // Izvuci jedinstvene nazive klubova (bez P1/P2)
+                const uniqueClubNames = [...new Set(
+                    Object.keys(clubsData).map(key => {
+                        const match = key.match(/^(.+) - P[12]$/);
+                        return match ? match[1] : null;
+                    }).filter(Boolean)
+                )].sort();
+                
                 let clubDropdown = '—';
-                if (trans.type === 'income') {
+                let polugodDropdown = '';
+                
+                if (trans.type === 'income' && trans.category === 'Prihodi od članarina') {
                     if (canEdit) {
+                        // Izvuci klub i polugodište iz trans.club_name (format: "RC Zagreb - P1")
+                        let selectedClub = '';
+                        let selectedPeriod = '';
+                        if (trans.club_name) {
+                            const match = trans.club_name.match(/^(.+) - (P[12])$/);
+                            if (match) {
+                                selectedClub = match[1];
+                                selectedPeriod = match[2];
+                            }
+                        }
+                        
                         clubDropdown = `
-                            <select data-id="${trans.id}" data-field="club_name" class="trans-edit-input club-select border rounded px-2 py-1 text-xs focus:ring-2 focus:ring-yellow-500 w-full">
+                            <select data-id="${trans.id}" data-field="club_name" class="trans-edit-input club-select border rounded px-2 py-1 text-xs focus:ring-2 focus:ring-yellow-500 w-full mb-1">
                                 <option value="">—</option>
-                                ${clubNames.map(club => 
-                                    `<option value="${club}" ${club === trans.club_name ? 'selected' : ''}>${club}</option>`
+                                ${uniqueClubNames.map(club => 
+                                    `<option value="${club}" ${club === selectedClub ? 'selected' : ''}>${club}</option>`
                                 ).join('')}
+                            </select>
+                            <select data-id="${trans.id}" data-field="polugodiste" class="trans-edit-input period-select border rounded px-2 py-1 text-xs focus:ring-2 focus:ring-yellow-500 w-full">
+                                <option value="">—</option>
+                                <option value="P1" ${selectedPeriod === 'P1' ? 'selected' : ''}>1. polugodište</option>
+                                <option value="P2" ${selectedPeriod === 'P2' ? 'selected' : ''}>2. polugodište</option>
                             </select>
                         `;
                     } else {
@@ -2020,7 +2048,10 @@
                 newSaveBtn.addEventListener('click', async () => {
                     // Skupi sve izmijenjene vrijednosti iz inputa/selecta
                     const pendingChanges = [];
-
+                    
+                    // Prvo skupi sve promjene za klub i polugodište PO TRANSAKCIJI
+                    const clubPeriodChanges = {};  // { transId: { club: '...', period: '...' } }
+                    
                     document.querySelectorAll('.trans-edit-input').forEach(el => {
                         const id = el.dataset.id;
                         const field = el.dataset.field;
@@ -2044,13 +2075,51 @@
                                 pendingChanges.push({ id, field, oldVal: trans.category, newVal, trans });
                             }
                         } else if (field === 'club_name') {
-                            // Prazan string znači odabrana je prazna opcija "—"
-                            const normalizedNewVal = newVal === '' ? null : newVal;
-                            if (normalizedNewVal !== trans.club_name) {
-                                pendingChanges.push({ id, field, oldVal: trans.club_name, newVal: normalizedNewVal, trans });
-                            }
+                            // Skupi promjene kluba
+                            if (!clubPeriodChanges[id]) clubPeriodChanges[id] = {};
+                            clubPeriodChanges[id].club = newVal || null;
+                        } else if (field === 'polugodiste') {
+                            // Skupi promjene polugodišta
+                            if (!clubPeriodChanges[id]) clubPeriodChanges[id] = {};
+                            clubPeriodChanges[id].period = newVal || null;
                         }
                     });
+                    
+                    // Kombiniraj klub + polugodište u club_name
+                    for (const [id, data] of Object.entries(clubPeriodChanges)) {
+                        const trans = transactions.find(t => t.id == id);
+                        if (!trans) continue;
+                        
+                        // Izvuci trenutni klub i period iz trans.club_name
+                        let currentClub = '';
+                        let currentPeriod = '';
+                        if (trans.club_name) {
+                            const match = trans.club_name.match(/^(.+) - (P[12])$/);
+                            if (match) {
+                                currentClub = match[1];
+                                currentPeriod = match[2];
+                            }
+                        }
+                        
+                        const newClub = data.club !== undefined ? data.club : currentClub;
+                        const newPeriod = data.period !== undefined ? data.period : currentPeriod;
+                        
+                        // Kombiniraj u format "RC Zagreb - P1"
+                        let newClubName = null;
+                        if (newClub && newPeriod) {
+                            newClubName = `${newClub} - ${newPeriod}`;
+                        }
+                        
+                        if (newClubName !== trans.club_name) {
+                            pendingChanges.push({ 
+                                id, 
+                                field: 'club_name', 
+                                oldVal: trans.club_name, 
+                                newVal: newClubName, 
+                                trans 
+                            });
+                        }
+                    }
 
                     if (pendingChanges.length === 0) {
                         alert('Nema promjena za spremiti.');
@@ -2377,11 +2446,24 @@
             }
             tb.innerHTML = '';
             let tR = 0, tS = 0, tRa = 0, tP = 0, tA = 0;
-            const names = Object.keys(clubsData).sort();
-            console.log('📋 Club names:', names);
             
-            if (names.length === 0) {
-                tb.innerHTML = '<tr><td colspan="8" class="px-4 py-12 text-center text-gray-500">Nema klubova. Kliknite "+ Dodaj klub"</td></tr>';
+            // Grupiraj po imenu kluba (bez P1/P2 sufiksa)
+            const clubGroups = {};
+            Object.keys(clubsData).forEach(key => {
+                const match = key.match(/^(.+) - (P[12])$/);
+                if (match) {
+                    const clubName = match[1];
+                    const period = match[2];
+                    if (!clubGroups[clubName]) clubGroups[clubName] = {};
+                    clubGroups[clubName][period] = key;
+                }
+            });
+            
+            const clubNames = Object.keys(clubGroups).sort();
+            console.log('📋 Club names:', clubNames);
+            
+            if (clubNames.length === 0) {
+                tb.innerHTML = '<tr><td colspan="9" class="px-4 py-12 text-center text-gray-500">Nema klubova. Kliknite "+ Dodaj klub"</td></tr>';
                 document.getElementById('total-rotary').textContent = '0';
                 document.getElementById('total-spouses').textContent = '0';
                 document.getElementById('total-rotaract').textContent = '0';
@@ -2391,21 +2473,53 @@
             }
 
             const canEdit = currentUser && (currentUser.role === 'admin' || currentUser.role === 'editor');
-            names.forEach(n => {
-                const c = clubsData[n];
-                const p = (c.rotaryMembers * 50) + (c.spouses * 30) + (c.rotaractMembers * 25);
-                const rem = p - c.actualPayment;
-                tR += c.rotaryMembers; tS += c.spouses; tRa += c.rotaractMembers; tP += p; tA += c.actualPayment;
-                tb.innerHTML += `<tr class="border-b hover:bg-gray-50">
-                    <td class="px-4 py-3 font-medium">${n}</td>
-                    <td class="px-4 py-3 text-center"><input type="number" min="0" value="${c.rotaryMembers}" data-club="${n}" data-f="rotaryMembers" class="ci w-20 px-2 py-1 border rounded text-center" ${!canEdit ? 'disabled' : ''}></td>
-                    <td class="px-4 py-3 text-center"><input type="number" min="0" value="${c.spouses}" data-club="${n}" data-f="spouses" class="ci w-20 px-2 py-1 border rounded text-center" ${!canEdit ? 'disabled' : ''}></td>
-                    <td class="px-4 py-3 text-center"><input type="number" min="0" value="${c.rotaractMembers}" data-club="${n}" data-f="rotaractMembers" class="ci w-20 px-2 py-1 border rounded text-center" ${!canEdit ? 'disabled' : ''}></td>
-                    <td class="px-4 py-3 text-right font-bold text-green-600">€${p.toLocaleString()}</td>
-                    <td class="px-4 py-3 text-right"><input type="number" min="0" step="0.01" value="${c.actualPayment}" data-club="${n}" data-f="actualPayment" class="ci w-28 px-2 py-1 border rounded text-right" ${!canEdit ? 'disabled' : ''}></td>
-                    <td class="px-4 py-3 text-right font-bold ${rem > 0 ? 'text-orange-600' : 'text-green-600'}">€${rem.toLocaleString()}</td>
-                    <td class="px-4 py-3 text-center">${canEdit ? `<button onclick="delClub('${n}')" class="text-red-600 hover:text-red-800 font-bold">✕</button>` : ''}</td>
-                </tr>`;
+            
+            clubNames.forEach(clubName => {
+                const periods = clubGroups[clubName];
+                
+                // P1 red
+                if (periods.P1) {
+                    const key = periods.P1;
+                    const c = clubsData[key];
+                    const p = (c.rotaryMembers * 50) + (c.spouses * 30) + (c.rotaractMembers * 25);
+                    const rem = p - c.actualPayment;
+                    tR += c.rotaryMembers; tS += c.spouses; tRa += c.rotaractMembers; tP += p; tA += c.actualPayment;
+                    
+                    tb.innerHTML += `<tr class="border-b hover:bg-gray-50 bg-blue-50">
+                        <td class="px-4 py-3 font-medium" rowspan="2">${clubName}</td>
+                        <td class="px-4 py-3 text-center text-xs">
+                            <span class="px-2 py-1 bg-blue-100 text-blue-800 rounded font-semibold">1. polugodište<br><span class="text-xs">(1.7.-31.12.)</span></span>
+                        </td>
+                        <td class="px-4 py-3 text-center"><input type="number" min="0" value="${c.rotaryMembers}" data-club="${key}" data-f="rotaryMembers" class="ci w-20 px-2 py-1 border rounded text-center" ${!canEdit ? 'disabled' : ''}></td>
+                        <td class="px-4 py-3 text-center"><input type="number" min="0" value="${c.spouses}" data-club="${key}" data-f="spouses" class="ci w-20 px-2 py-1 border rounded text-center" ${!canEdit ? 'disabled' : ''}></td>
+                        <td class="px-4 py-3 text-center"><input type="number" min="0" value="${c.rotaractMembers}" data-club="${key}" data-f="rotaractMembers" class="ci w-20 px-2 py-1 border rounded text-center" ${!canEdit ? 'disabled' : ''}></td>
+                        <td class="px-4 py-3 text-right font-bold text-green-600">€${p.toLocaleString()}</td>
+                        <td class="px-4 py-3 text-right"><input type="number" min="0" step="0.01" value="${c.actualPayment}" data-club="${key}" data-f="actualPayment" class="ci w-28 px-2 py-1 border rounded text-right" ${!canEdit ? 'disabled' : ''}></td>
+                        <td class="px-4 py-3 text-right font-bold ${rem > 0 ? 'text-orange-600' : 'text-green-600'}">€${rem.toLocaleString()}</td>
+                        <td class="px-4 py-3 text-center" rowspan="2">${canEdit ? `<button onclick="delClub('${clubName}')" class="text-red-600 hover:text-red-800 font-bold">✕</button>` : ''}</td>
+                    </tr>`;
+                }
+                
+                // P2 red
+                if (periods.P2) {
+                    const key = periods.P2;
+                    const c = clubsData[key];
+                    const p = (c.rotaryMembers * 50) + (c.spouses * 30) + (c.rotaractMembers * 25);
+                    const rem = p - c.actualPayment;
+                    tR += c.rotaryMembers; tS += c.spouses; tRa += c.rotaractMembers; tP += p; tA += c.actualPayment;
+                    
+                    tb.innerHTML += `<tr class="border-b hover:bg-gray-50 bg-green-50">
+                        <td class="px-4 py-3 text-center text-xs">
+                            <span class="px-2 py-1 bg-green-100 text-green-800 rounded font-semibold">2. polugodište<br><span class="text-xs">(1.1.-30.6.)</span></span>
+                        </td>
+                        <td class="px-4 py-3 text-center"><input type="number" min="0" value="${c.rotaryMembers}" data-club="${key}" data-f="rotaryMembers" class="ci w-20 px-2 py-1 border rounded text-center" ${!canEdit ? 'disabled' : ''}></td>
+                        <td class="px-4 py-3 text-center"><input type="number" min="0" value="${c.spouses}" data-club="${key}" data-f="spouses" class="ci w-20 px-2 py-1 border rounded text-center" ${!canEdit ? 'disabled' : ''}></td>
+                        <td class="px-4 py-3 text-center"><input type="number" min="0" value="${c.rotaractMembers}" data-club="${key}" data-f="rotaractMembers" class="ci w-20 px-2 py-1 border rounded text-center" ${!canEdit ? 'disabled' : ''}></td>
+                        <td class="px-4 py-3 text-right font-bold text-green-600">€${p.toLocaleString()}</td>
+                        <td class="px-4 py-3 text-right"><input type="number" min="0" step="0.01" value="${c.actualPayment}" data-club="${key}" data-f="actualPayment" class="ci w-28 px-2 py-1 border rounded text-right" ${!canEdit ? 'disabled' : ''}></td>
+                        <td class="px-4 py-3 text-right font-bold ${rem > 0 ? 'text-orange-600' : 'text-green-600'}">€${rem.toLocaleString()}</td>
+                    </tr>`;
+                }
             });
             
             document.getElementById('total-rotary').textContent = tR;
@@ -2415,12 +2529,12 @@
             document.getElementById('total-actual').textContent = '€' + tA.toLocaleString();
             
             document.querySelectorAll('.ci').forEach(i => i.addEventListener('change', e => {
-                const n = e.target.dataset.club;
+                const key = e.target.dataset.club;
                 const f = e.target.dataset.f;
-                const old = clubsData[n][f];
+                const old = clubsData[key][f];
                 const newV = f === 'actualPayment' ? parseFloat(e.target.value) || 0 : parseInt(e.target.value) || 0;
-                if (old !== newV) logPrihodActivity('club', n, f, old, newV);
-                clubsData[n][f] = newV;
+                if (old !== newV) logPrihodActivity('club', key, f, old, newV);
+                clubsData[key][f] = newV;
                 updateMainBudgetFromClubs();
             }));
         }
@@ -2591,16 +2705,22 @@
             }
         }
 
-        async function delClub(n) {
-            if (confirm('Obrisati "' + n + '"?')) {
-                await sb.from('clubs').delete().eq('name', n);
+        async function delClub(clubName) {
+            if (confirm(`Obrisati klub "${clubName}" (oba polugodišta)?`)) {
+                // Obriši oba polugodišta iz baze
+                await sb.from('clubs').delete().eq('name', clubName);
+                
                 await sb.from('activity_logs').insert({
                     log_type: 'club_deleted',
-                    description: `Klub "${n}" obrisan`,
+                    description: `Klub "${clubName}" obrisan (oba polugodišta)`,
                     user_name: currentUser ? currentUser.name : 'System',
                     user_id: currentUser ? currentUser.id : null
                 });
-                delete clubsData[n];
+                
+                // Obriši oba ključa iz clubsData
+                delete clubsData[`${clubName} - P1`];
+                delete clubsData[`${clubName} - P2`];
+                
                 renderClubs();
             }
         }
@@ -2610,12 +2730,28 @@
             if (addBtn) addBtn.addEventListener('click', async () => {
                 const n = prompt('Naziv kluba (npr. RC Zagreb, Rotaract Split):');
                 if (n && n.trim()) {
-                    if (clubsData[n.trim()]) { alert('Klub već postoji!'); return; }
-                    clubsData[n.trim()] = { rotaryMembers: 0, spouses: 0, rotaractMembers: 0, actualPayment: 0 };
-                    await sb.from('clubs').insert({ name: n.trim(), rotary_members: 0, spouses: 0, rotaract_members: 0, actual_payment: 0 });
+                    const clubName = n.trim();
+                    const keyP1 = `${clubName} - P1`;
+                    const keyP2 = `${clubName} - P2`;
+                    
+                    if (clubsData[keyP1] || clubsData[keyP2]) { 
+                        alert('Klub već postoji!'); 
+                        return; 
+                    }
+                    
+                    // Kreiraj 2 reda - P1 i P2
+                    clubsData[keyP1] = { rotaryMembers: 0, spouses: 0, rotaractMembers: 0, actualPayment: 0 };
+                    clubsData[keyP2] = { rotaryMembers: 0, spouses: 0, rotaractMembers: 0, actualPayment: 0 };
+                    
+                    // Spremi u bazu (dodati stupac polugodiste)
+                    await sb.from('clubs').insert([
+                        { name: clubName, polugodiste: 'P1', rotary_members: 0, spouses: 0, rotaract_members: 0, actual_payment: 0 },
+                        { name: clubName, polugodiste: 'P2', rotary_members: 0, spouses: 0, rotaract_members: 0, actual_payment: 0 }
+                    ]);
+                    
                     await sb.from('activity_logs').insert({
                         log_type: 'club_added',
-                        description: `Klub "${n.trim()}" dodan`,
+                        description: `Klub "${clubName}" dodan (oba polugodišta)`,
                         user_name: currentUser ? currentUser.name : 'System',
                         user_id: currentUser ? currentUser.id : null
                     });
@@ -2642,14 +2778,23 @@
             if (saveClubs) saveClubs.addEventListener('click', async () => {
                 showLoading(true);
                 let savedCount = 0;
-                for (const [name, c] of Object.entries(clubsData)) {
+                for (const [key, c] of Object.entries(clubsData)) {
+                    // Izvuci ime i polugodište iz ključa "RC Zagreb - P1"
+                    const match = key.match(/^(.+) - (P[12])$/);
+                    if (!match) continue;
+                    
+                    const clubName = match[1];
+                    const period = match[2];
+                    
                     const { error } = await sb.from('clubs').upsert({
-                        name: name,
+                        name: clubName,
+                        polugodiste: period,
                         rotary_members: c.rotaryMembers,
                         spouses: c.spouses,
                         rotaract_members: c.rotaractMembers,
                         actual_payment: c.actualPayment
-                    }, { onConflict: 'name' });
+                    }, { onConflict: 'name,polugodiste' });
+                    
                     if (!error) savedCount++;
                     else console.error('Club save error:', error);
                 }
@@ -2657,15 +2802,19 @@
                 await saveData('rotary-budget', budgetData);
                 await sb.from('activity_logs').insert({
                     log_type: 'club_change',
-                    description: `Članarine ažurirane (${savedCount} klubova)`,
+                    description: `Članarine ažurirane (${savedCount} redova)`,
                     user_name: currentUser ? currentUser.name : 'System',
                     user_id: currentUser ? currentUser.id : null
                 });
+                
+                // Reload podataka iz baze
                 const { data: clubRows, error: clubError } = await sb.from('clubs').select('*');
                 if (clubRows && clubRows.length > 0) {
                     clubsData = {};
                     clubRows.forEach(c => {
-                        clubsData[c.name] = {
+                        const period = c.polugodiste || 'P1';
+                        const key = `${c.name} - ${period}`;
+                        clubsData[key] = {
                             rotaryMembers: c.rotary_members || 0,
                             spouses: c.spouses || 0,
                             rotaractMembers: c.rotaract_members || 0,
@@ -2673,6 +2822,7 @@
                         };
                     });
                 }
+                
                 const { data: prihodiRows } = await sb.from('activity_logs').select('*').in('log_type', ['club_change', 'club_added', 'club_deleted', 'income_change']).order('created_at', { ascending: false }).limit(100);
                 if (prihodiRows) {
                     prihodiLog = prihodiRows.map(r => ({
