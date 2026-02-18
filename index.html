@@ -1365,7 +1365,13 @@
                     // Format date - sada podržava i američki i hrvatski format
                     let dateStr = '';
                     if (typeof rawDate === 'string') {
-                        const trimmed = rawDate.trim();
+                        let trimmed = rawDate.trim();
+                        
+                        // Ukloni točku na kraju ako postoji (24.09.2025. → 24.09.2025)
+                        if (trimmed.endsWith('.')) {
+                            trimmed = trimmed.slice(0, -1);
+                        }
+                        
                         // Hrvatski DD.MM.YYYY
                         if (trimmed.match(/^\d{1,2}\.\d{1,2}\.\d{4}$/)) {
                             dateStr = trimmed;
@@ -1373,10 +1379,11 @@
                         // Američki M/D/YY ili M/D/YYYY
                         else if (trimmed.match(/^\d{1,2}\/\d{1,2}\/\d{2,4}$/)) {
                             const p = trimmed.split('/');
-                            const day = p[1].padStart(2, '0');
-                            const month = p[0].padStart(2, '0');
+                            const month = p[0].padStart(2, '0');  // M → MM (MJESEC je PRVI!)
+                            const day = p[1].padStart(2, '0');    // D → DD (DAN je DRUGI!)
                             let year = p[2];
                             if (year.length === 2) year = (parseInt(year) < 50 ? '20' : '19') + year;
+                            // KRITIČNO: Američki format je M/D/Y, pa je dan=p[1], mjesec=p[0]
                             dateStr = `${day}.${month}.${year}`;
                         }
                     } else if (typeof rawDate === 'number') {
