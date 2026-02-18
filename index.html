@@ -1356,6 +1356,9 @@
 
                 const newTransactions = [];
                 const skippedDuplicates = [];
+                let skippedNoCellA = 0;
+                let skippedNoAmount = 0;
+                let skippedBadDate = 0;
 
                 console.log('🔵 6. Pocinjem iteraciju kroz redove...');
                 // Iteriraj kroz sve redove
@@ -1367,7 +1370,10 @@
                     const cellE = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 4 })]; // Expense
                     const cellF = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 5 })]; // Income
 
-                    if (!cellA) continue;
+                    if (!cellA) {
+                        skippedNoCellA++;
+                        continue;
+                    }
 
                     // KRITIČNO: Uvijek čitaj .w (formatted text) prvo, pa tek onda .v
                     let rawDate = cellA.w || cellA.v;
@@ -1383,7 +1389,10 @@
                     const incomeVal = cellF ? (parseFloat(String(cellF.v).replace(',', '.')) || 0) : 0;
 
                     // Skip header rows and empty rows
-                    if (!rawDate || (!expenseVal && !incomeVal)) continue;
+                    if (!rawDate || (!expenseVal && !incomeVal)) {
+                        skippedNoAmount++;
+                        continue;
+                    }
                     
                     // Parsiranje datuma - SAMO string format DD.MM.YYYY
                     let dateStr = '';
@@ -1396,6 +1405,7 @@
                             console.log(`✅ Red ${rowNum}: datum = "${dateStr}" (OK)`);
                         } else {
                             console.log(`⚠️ Red ${rowNum}: krivi format datuma = "${trimmed}"`);
+                            skippedBadDate++;
                             continue;
                         }
                     } else if (typeof rawDate === 'number') {
@@ -1404,11 +1414,13 @@
                         console.log(`🔢 Red ${rowNum}: serial ${rawDate} → "${dateStr}"`);
                     } else {
                         console.log(`❌ Red ${rowNum}: neprepoznat tip datuma =`, rawDate, typeof rawDate);
+                        skippedBadDate++;
                         continue;
                     }
                     
                     if (!dateStr || !dateStr.match(/\d{1,2}\.\d{1,2}\.\d{4}/)) {
                         console.log(`❌ Red ${rowNum}: finalna provjera nije prošla, dateStr = "${dateStr}"`);
+                        skippedBadDate++;
                         continue;
                     }
 
@@ -1444,6 +1456,16 @@
                     });
                 }
 
+                console.log('📊 STATISTIKA PARSIRANJA:');
+                console.log(`   Total redova u CSV-u: ${range.e.r + 1}`);
+                console.log(`   ✅ Nove transakcije: ${newTransactions.length}`);
+                console.log(`   ⏭️ Duplikati preskočeni: ${skippedDuplicates.length}`);
+                console.log(`   ❌ Preskočeno - nema cellA: ${skippedNoCellA}`);
+                console.log(`   ❌ Preskočeno - nema iznosa: ${skippedNoAmount}`);
+                console.log(`   ❌ Preskočeno - loš datum: ${skippedBadDate}`);
+                console.log(`   📝 Total preskočeno: ${skippedNoCellA + skippedNoAmount + skippedBadDate + skippedDuplicates.length}`);
+                console.log(`   ✔️ Provjera: ${newTransactions.length} + ${skippedNoCellA + skippedNoAmount + skippedBadDate + skippedDuplicates.length} = ${newTransactions.length + skippedNoCellA + skippedNoAmount + skippedBadDate + skippedDuplicates.length} od ${range.e.r + 1}`);
+
                 if (newTransactions.length === 0) {
                     progress.classList.add('hidden');
                     alert(`Nema novih transakcija!\n\n${skippedDuplicates.length} transakcija je već u sustavu.`);
@@ -1451,6 +1473,7 @@
                     return;
                 }
 
+                console.log('🤖 Pokrećem AI kategorizaciju...');
                 // AI kategorization
                 progressText.textContent = `AI kategorizacija ${newTransactions.length} transakcija...`;
 
