@@ -1358,6 +1358,11 @@
                     const expenseVal = parseFloat(String(row[4]).replace(',', '.')) || 0;
                     const incomeVal = parseFloat(String(row[5]).replace(',', '.')) || 0;
 
+                    // DEBUG - ispis tipa za prvi red koji ima broj
+                    if (i >= 43 && i <= 45) {
+                        console.log(`🔍 DEBUG Red ${i}: row[0] =`, row[0], `| typeof =`, typeof row[0], `| je number?`, typeof row[0] === 'number');
+                    }
+
                     // Skip ako nema datuma ili iznosa
                     if (!rawDate || (!expenseVal && !incomeVal)) continue;
                     
