@@ -1333,23 +1333,31 @@
             progressText.textContent = 'Čitam datoteku...';
 
             try {
+                console.log('🔵 1. Čitam arrayBuffer...');
                 const arrayBuffer = await file.arrayBuffer();
+                
+                console.log('🔵 2. Parsiram XLSX...');
                 // VAŽNO: cellDates: false i raw: false sprječavaju automatsku konverziju datuma
                 const workbook = XLSX.read(arrayBuffer, { 
                     type: 'array', 
                     cellDates: false,
                     raw: false  // Ne pretvori datume u brojeve
                 });
+                
+                console.log('🔵 3. Dohvaćam sheet...');
                 const sheet = workbook.Sheets[workbook.SheetNames[0]];
                 
+                console.log('🔵 4. Decode range...');
                 // Nađi range
                 const range = XLSX.utils.decode_range(sheet['!ref']);
                 
+                console.log('🔵 5. Range decoded:', range);
                 progressText.textContent = `Pronađeno ${range.e.r + 1} redaka. Filtriram transakcije...`;
 
                 const newTransactions = [];
                 const skippedDuplicates = [];
 
+                console.log('🔵 6. Pocinjem iteraciju kroz redove...');
                 // Iteriraj kroz sve redove
                 for (let rowNum = range.s.r; rowNum <= range.e.r; rowNum++) {
                     // Čitaj raw vrijednosti iz ćelija
