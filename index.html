@@ -1264,22 +1264,46 @@
         // Helper: parse Excel date serial to DD.MM.YYYY
         function excelDateToString(serial) {
             if (!serial) return '';
-            if (typeof serial === 'string' && serial.includes('.')) {
-                // String datum - provjeri format
+            
+            // Ako je već string
+            if (typeof serial === 'string') {
                 const trimmed = serial.trim();
                 console.log('📅 String datum iz Excel-a:', trimmed);
+                
+                // Provjeri da li je u DD.MM.YYYY formatu
+                if (trimmed.match(/^\d{1,2}\.\d{1,2}\.\d{4}$/)) {
+                    return trimmed; // Već je u dobrom formatu
+                }
+                
+                // Ako je u nekom drugom formatu, pokušaj parsirati
                 return trimmed;
             }
-            // Excel date serial
-            const utc_days = Math.floor(serial - 25569);
-            const utc_value = utc_days * 86400;
-            const date = new Date(utc_value * 1000);
-            const d = String(date.getUTCDate()).padStart(2, '0');
-            const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-            const y = date.getUTCFullYear();
-            const result = `${d}.${m}.${y}`;
-            console.log('📅 Serial datum iz Excel-a:', serial, '→', result);
-            return result;
+            
+            // Ako je Excel serial broj (broj dana od 1.1.1900)
+            if (typeof serial === 'number') {
+                const utc_days = Math.floor(serial - 25569);
+                const utc_value = utc_days * 86400;
+                const date = new Date(utc_value * 1000);
+                const d = String(date.getUTCDate()).padStart(2, '0');
+                const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+                const y = date.getUTCFullYear();
+                const result = `${d}.${m}.${y}`;
+                console.log('📅 Serial datum iz Excel-a:', serial, '→', result);
+                return result;
+            }
+            
+            // Ako je JavaScript Date objekt (što Excel parser ponekad vraća)
+            if (serial instanceof Date) {
+                const d = String(serial.getDate()).padStart(2, '0');
+                const m = String(serial.getMonth() + 1).padStart(2, '0');
+                const y = serial.getFullYear();
+                const result = `${d}.${m}.${y}`;
+                console.log('📅 Date objekt iz Excel-a:', serial, '→', result);
+                return result;
+            }
+            
+            console.log('⚠️ Nepoznati format datuma:', serial, typeof serial);
+            return '';
         }
 
         // Helper: extract month label from DD.MM.YYYY
@@ -1306,29 +1330,49 @@
 
             try {
                 const arrayBuffer = await file.arrayBuffer();
-                const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+                const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false });
                 const sheet = workbook.Sheets[workbook.SheetNames[0]];
-                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-
-                progressText.textContent = `Pronađeno ${rows.length} redaka. Filtriram transakcije...`;
+                
+                // Nađi range
+                const range = XLSX.utils.decode_range(sheet['!ref']);
+                
+                progressText.textContent = `Pronađeno ${range.e.r + 1} redaka. Filtriram transakcije...`;
 
                 const newTransactions = [];
                 const skippedDuplicates = [];
 
-                for (let i = 0; i < rows.length; i++) {
-                    const row = rows[i];
-                    if (!row || row.length < 5) continue;
+                // Iteriraj kroz sve redove
+                for (let rowNum = range.s.r; rowNum <= range.e.r; rowNum++) {
+                    // Čitaj raw vrijednosti iz ćelija (umjesto JSON parsiranja)
+                    const cellA = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 0 })]; // Datum
+                    const cellC = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 2 })]; // User
+                    const cellD = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 3 })]; // Description
+                    const cellE = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 4 })]; // Expense
+                    const cellF = sheet[XLSX.utils.encode_cell({ r: rowNum, c: 5 })]; // Income
 
-                    // Column A = date, C = user, D = description, E = expense, F = income
-                    const rawDate = row[0];
-                    const user = String(row[2] || '').trim();
-                    const desc = String(row[3] || '').trim();
-                    const expenseVal = parseFloat(String(row[4]).replace(',', '.')) || 0;
-                    const incomeVal = parseFloat(String(row[5]).replace(',', '.')) || 0;
+                    // Izvuci RAW vrijednost datuma (w = formatted text)
+                    const rawDate = cellA ? (cellA.w || cellA.v) : null;
+                    const user = cellC ? String(cellC.v || '').trim() : '';
+                    const desc = cellD ? String(cellD.v || '').trim() : '';
+                    const expenseVal = cellE ? (parseFloat(String(cellE.v).replace(',', '.')) || 0) : 0;
+                    const incomeVal = cellF ? (parseFloat(String(cellF.v).replace(',', '.')) || 0) : 0;
 
                     // Skip header rows and empty rows
                     if (!rawDate || (!expenseVal && !incomeVal)) continue;
-                    const dateStr = excelDateToString(rawDate);
+                    
+                    // Parsiranje datuma
+                    let dateStr = '';
+                    if (typeof rawDate === 'string' && rawDate.includes('.')) {
+                        // Već je u DD.MM.YYYY formatu
+                        dateStr = rawDate.trim();
+                    } else if (typeof rawDate === 'number') {
+                        // Excel serial date
+                        dateStr = excelDateToString(rawDate);
+                    } else {
+                        console.log('⚠️ Neprepoznat format datuma:', rawDate, typeof rawDate);
+                        continue;
+                    }
+                    
                     if (!dateStr.match(/\d{1,2}\.\d{1,2}\.\d{4}/)) continue;
 
                     const amount = incomeVal > 0 ? incomeVal : -expenseVal;
