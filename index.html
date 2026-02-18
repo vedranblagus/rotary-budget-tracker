@@ -1389,6 +1389,7 @@
                             if (year.length === 2) year = (parseInt(year) < 50 ? '20' : '19') + year;
                             // Američki format je M/D/Y, pa pretvaramo u hrvatski DD.MM.YYYY
                             dateStr = `${day}.${month}.${year}`;
+                            console.log(`🔄 Red ${i}: američki "${trimmed}" → hrvatski "${dateStr}" (dan=${day}, mjesec=${month})`);
                         }
                     } else if (typeof rawDate === 'number') {
                         // Excel serial date
