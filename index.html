@@ -1334,12 +1334,11 @@
 
             try {
                 const arrayBuffer = await file.arrayBuffer();
-                // VAŽNO: cellDates: false i rawNumbers: false sprječavaju automatsku konverziju datuma
+                // VAŽNO: cellDates: false i raw: false sprječavaju automatsku konverziju datuma
                 const workbook = XLSX.read(arrayBuffer, { 
                     type: 'array', 
                     cellDates: false,
-                    raw: false,  // Ne pretvori datume u brojeve
-                    dateNF: 'dd.mm.yyyy'  // Format datuma
+                    raw: false  // Ne pretvori datume u brojeve
                 });
                 const sheet = workbook.Sheets[workbook.SheetNames[0]];
                 
