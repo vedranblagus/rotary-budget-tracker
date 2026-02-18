@@ -1370,15 +1370,18 @@
                     let dateStr = '';
                     
                     if (typeof rawDate === 'number') {
-                        // Excel serial number (45667 → 01.10.2025)
+                        // Excel serial number
                         const utc_days = Math.floor(rawDate - 25569);
                         const utc_value = utc_days * 86400;
                         const date = new Date(utc_value * 1000);
-                        const d = String(date.getUTCDate()).padStart(2, '0');
-                        const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-                        const y = date.getUTCFullYear();
-                        dateStr = `${d}.${m}.${y}`;
-                        console.log(`🔢 Red ${i}: Excel serial ${rawDate} → ${dateStr}`);
+                        const day = String(date.getUTCDate()).padStart(2, '0');
+                        const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+                        const year = date.getUTCFullYear();
+                        
+                        // SWAP - Excel vraća američki format, mi želimo hrvatski
+                        // Excel: month/day/year → mi želimo: day.month.year
+                        dateStr = `${month}.${day}.${year}`;  // SWAP: month postaje dan, day postaje mjesec
+                        console.log(`🔢 Red ${i}: Excel serial ${rawDate} → ISO: ${date.toISOString().split('T')[0]} → HR: ${dateStr}`);
                     }
                     else if (typeof rawDate === 'string') {
                         let cleaned = rawDate.trim();
