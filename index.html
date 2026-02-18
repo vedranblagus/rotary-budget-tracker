@@ -517,9 +517,14 @@
                             <h2 class="text-xl font-semibold text-rotary-blue">Sve transakcije</h2>
                             <p class="text-gray-600 text-sm mt-1">Ukupno: <span id="transaction-count">0</span> transakcija</p>
                         </div>
-                        <button id="save-transactions-btn" class="hidden rotary-gold text-white px-5 py-2 rounded-2xl font-semibold shadow-lg edit-column">
-                            💾 Spremi promjene
-                        </button>
+                        <div class="flex gap-3">
+                            <button id="save-transactions-btn" class="hidden rotary-gold text-white px-5 py-2 rounded-2xl font-semibold shadow-lg edit-column">
+                                💾 Spremi promjene
+                            </button>
+                            <button id="delete-all-transactions-btn" class="hidden bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-2xl font-semibold shadow-lg edit-column">
+                                🗑️ Obriši sve
+                            </button>
+                        </div>
                     </div>
                     
                     <div class="overflow-x-auto">
@@ -1782,9 +1787,68 @@
 
             // Prikaži gumb za spremanje samo ako može editirati
             const saveBtn = document.getElementById('save-transactions-btn');
+            const deleteAllBtn = document.getElementById('delete-all-transactions-btn');
+            
             if (saveBtn) {
                 if (canEdit) saveBtn.classList.remove('hidden');
                 else saveBtn.classList.add('hidden');
+            }
+            
+            if (deleteAllBtn) {
+                if (canEdit) deleteAllBtn.classList.remove('hidden');
+                else deleteAllBtn.classList.add('hidden');
+                
+                // Dodaj event listener za brisanje svih transakcija
+                const newDeleteAllBtn = deleteAllBtn.cloneNode(true);
+                deleteAllBtn.parentNode.replaceChild(newDeleteAllBtn, deleteAllBtn);
+                
+                newDeleteAllBtn.addEventListener('click', async () => {
+                    const count = transactions.length;
+                    
+                    if (count === 0) {
+                        alert('Nema transakcija za brisanje.');
+                        return;
+                    }
+                    
+                    // DOUBLE CONFIRM
+                    const confirm1 = confirm(`⚠️ UPOZORENJE!\n\nOvo će obrisati SVE transakcije (${count} komada).\n\nOva akcija se NE MOŽE poništiti!\n\nŽeliš li nastaviti?`);
+                    if (!confirm1) return;
+                    
+                    const confirm2 = confirm(`⚠️ POSLJEDNJE UPOZORENJE!\n\nSpreman si obrisati ${count} transakcija.\n\nJesi li APSOLUTNO SIGURAN?\n\nKlikni OK za TRAJNO BRISANJE ili Cancel za odustajanje.`);
+                    if (!confirm2) return;
+                    
+                    showLoading(true);
+                    
+                    // Obriši sve transakcije iz Supabase
+                    const { error } = await sb.from('transactions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+                    
+                    if (error) {
+                        showLoading(false);
+                        alert('Greška pri brisanju: ' + error.message);
+                        return;
+                    }
+                    
+                    // Obriši iz lokalnog stanja
+                    transactions = [];
+                    
+                    // Log aktivnost
+                    await sb.from('activity_logs').insert({
+                        log_type: 'bulk_delete',
+                        description: `Obrisano ${count} transakcija`,
+                        old_value: String(count),
+                        new_value: '0',
+                        user_name: currentUser ? currentUser.name : 'System',
+                        user_id: currentUser ? currentUser.id : null
+                    });
+                    
+                    showLoading(false);
+                    
+                    // Osvježi prikaze
+                    renderTransactions();
+                    renderDashboard();
+                    
+                    alert(`✅ Uspješno obrisano ${count} transakcija!`);
+                });
             }
 
             transactions.forEach(trans => {
