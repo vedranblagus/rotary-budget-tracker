@@ -1614,7 +1614,7 @@
                 showLoading(false);
 
                 renderTransactions();
-
+                renderOtherIncome();  // Ažuriraj "Ostali prihodi"
                 renderDashboard();
 
                 alert(`✅ Uspješno spremljeno ${insertRows.length} transakcija!`);
@@ -2190,7 +2190,7 @@
 
                     // Osvježi sve poglede
                     renderTransactions();
-
+                    renderOtherIncome();  // Ažuriraj "Ostali prihodi" sa novim iznosima
                     renderDashboard();
                     renderTransactionsLog();
                     renderClubs(); // Osvježi prikaz klubova
@@ -2206,6 +2206,7 @@
                 await sb.from('transactions').delete().eq('id', id);
                 transactions = transactions.filter(t => t.id != id);
                 renderTransactions();
+                renderOtherIncome();  // Ažuriraj "Ostali prihodi"
                 renderDashboard();
             }
         }
@@ -2544,7 +2545,34 @@
             }));
         }
 
+        function calculateActualFromTransactions() {
+            // Izračunaj zbroj transakcija po income kategoriji
+            const actualByCategory = {};
+            
+            // Inicijaliziraj sve kategorije na 0
+            for (let cat in otherIncomeData) {
+                actualByCategory[cat] = 0;
+            }
+            
+            // Zbroji transakcije po kategoriji (samo income transakcije)
+            transactions.forEach(t => {
+                if (t.type === 'income' && otherIncomeData[t.category] !== undefined) {
+                    actualByCategory[t.category] += t.amount;
+                }
+            });
+            
+            // Ažuriraj otherIncomeData sa izračunatim iznosima
+            for (let cat in actualByCategory) {
+                otherIncomeData[cat].actual = actualByCategory[cat];
+            }
+            
+            console.log('💰 Izračunato realizirano iz transakcija:', actualByCategory);
+        }
+
         function renderOtherIncome() {
+            // Prvo izračunaj actual iz transakcija
+            calculateActualFromTransactions();
+            
             const c = document.getElementById('other-income');
             if (!c) return;
             c.innerHTML = '';
@@ -2557,14 +2585,17 @@
                     <div class="space-y-2">
                         <div><label class="text-xs text-gray-600">Planirano €</label>
                         <input type="number" min="0" step="0.01" value="${d.planned}" data-cat="${cat}" data-f="planned" class="oi w-full px-3 py-2 border rounded" ${!canEdit ? 'disabled' : ''}></div>
-                        <div><label class="text-xs text-gray-600">Realizirano €</label>
-                        <input type="number" min="0" step="0.01" value="${d.actual}" data-cat="${cat}" data-f="actual" class="oi w-full px-3 py-2 border rounded" ${!canEdit ? 'disabled' : ''}></div>
+                        <div>
+                            <label class="text-xs text-gray-600">Realizirano € <span class="text-blue-600">🔒 Auto</span></label>
+                            <input type="number" min="0" step="0.01" value="${d.actual.toFixed(2)}" data-cat="${cat}" data-f="actual" class="oi w-full px-3 py-2 border rounded bg-blue-50 cursor-not-allowed" disabled readonly title="Automatski izračunato iz transakcija">
+                            <p class="text-xs text-gray-500 mt-1">💡 Zbroj iz taba "Transakcije"</p>
+                        </div>
                         <div class="pt-2 border-t"><p class="text-xs text-gray-600">Preostalo</p>
                         <p class="text-lg font-bold ${rem > 0 ? 'text-orange-600' : 'text-green-600'}">€${rem.toLocaleString()}</p></div>
                     </div>
                 </div>`;
             }
-            document.querySelectorAll('.oi').forEach(i => i.addEventListener('change', e => {
+            document.querySelectorAll('.oi:not([disabled])').forEach(i => i.addEventListener('change', e => {
                 const cat = e.target.dataset.cat;
                 const f = e.target.dataset.f;
                 const old = otherIncomeData[cat][f];
