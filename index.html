@@ -1569,7 +1569,10 @@
                     club_name: t.club_name || null
                 }));
                 
-                console.log('💾 Spremam u bazu (prvi red):', insertRows[0]);
+                console.log('💾 Spremam u bazu - PRVI RED:');
+                console.log('   date:', insertRows[0].date);
+                console.log('   description:', insertRows[0].description);
+                console.log('   amount:', insertRows[0].amount);
 
                 const { data: inserted, error } = await sb.from('transactions').insert(insertRows).select();
                 if (error) {
