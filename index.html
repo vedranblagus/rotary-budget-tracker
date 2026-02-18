@@ -1352,7 +1352,7 @@
                     const row = rows[i];
                     if (!row || row.length < 5) continue;
 
-                    let rawDate = String(row[0] || '').trim();
+                    const rawDate = row[0];  // NE konvertiraj odmah u String!
                     const user = String(row[2] || '').trim();
                     const desc = String(row[3] || '').trim();
                     const expenseVal = parseFloat(String(row[4]).replace(',', '.')) || 0;
@@ -1361,22 +1361,47 @@
                     // Skip ako nema datuma ili iznosa
                     if (!rawDate || (!expenseVal && !incomeVal)) continue;
                     
-                    // Ukloni točku na kraju ako postoji
-                    if (rawDate.endsWith('.')) rawDate = rawDate.slice(0, -1);
+                    // Konverzija datuma ovisno o tipu
+                    let dateStr = '';
                     
-                    // Provjeri da li je DD.MM.YYYY format
-                    if (!rawDate.match(/^\d{1,2}\.\d{1,2}\.\d{4}$/)) {
-                        console.log(`⚠️ Red ${i}: preskačem - krivi format "${rawDate}"`);
+                    if (typeof rawDate === 'number') {
+                        // Excel serial number (45667 → 01.10.2025)
+                        const utc_days = Math.floor(rawDate - 25569);
+                        const utc_value = utc_days * 86400;
+                        const date = new Date(utc_value * 1000);
+                        const d = String(date.getUTCDate()).padStart(2, '0');
+                        const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+                        const y = date.getUTCFullYear();
+                        dateStr = `${d}.${m}.${y}`;
+                        console.log(`🔢 Red ${i}: Excel serial ${rawDate} → ${dateStr}`);
+                    }
+                    else if (typeof rawDate === 'string') {
+                        let cleaned = rawDate.trim();
+                        if (cleaned.endsWith('.')) cleaned = cleaned.slice(0, -1);
+                        
+                        if (cleaned.match(/^\d{1,2}\.\d{1,2}\.\d{4}$/)) {
+                            const parts = cleaned.split('.');
+                            const day = parts[0].padStart(2, '0');
+                            const month = parts[1].padStart(2, '0');
+                            const year = parts[2];
+                            dateStr = `${day}.${month}.${year}`;
+                        }
+                    }
+                    else if (rawDate instanceof Date) {
+                        const d = String(rawDate.getDate()).padStart(2, '0');
+                        const m = String(rawDate.getMonth() + 1).padStart(2, '0');
+                        const y = rawDate.getFullYear();
+                        dateStr = `${d}.${m}.${y}`;
+                    }
+                    
+                    if (!dateStr || !dateStr.match(/^\d{2}\.\d{2}\.\d{4}$/)) {
+                        console.log(`⚠️ Red ${i}: preskačem - krivi format "${rawDate}" (tip: ${typeof rawDate})`);
                         continue;
                     }
 
-                    // Normaliziraj format (dodaj leading zeros) i izvuci mjesec
-                    const parts = rawDate.split('.');
-                    const day = parts[0].padStart(2, '0');
-                    const month = parts[1].padStart(2, '0');
-                    const year = parts[2];
-                    const dateStr = `${day}.${month}.${year}`;
-                    const monthStr = `${month}/${year}`;
+                    // Izvuci mjesec iz datuma
+                    const parts = dateStr.split('.');
+                    const monthStr = `${parts[1]}/${parts[2]}`;
 
                     console.log(`✅ Red ${i}: datum="${dateStr}", mjesec="${monthStr}"`);
 
