@@ -1040,9 +1040,13 @@
             const incomeContainer = document.getElementById('income-budget-inputs');
             incomeContainer.innerHTML = '';
             INCOME_CATEGORIES.forEach(cat => {
+                const isClanarineLocked = cat === 'Prihodi od članarina';
                 incomeContainer.innerHTML += `
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">${cat}</label>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">
+                            ${cat}
+                            ${isClanarineLocked ? '<span class="text-xs text-blue-600">🔒 Auto-izračunato</span>' : ''}
+                        </label>
                         <div class="relative">
                             <span class="absolute left-3 top-2 text-gray-500">€</span>
                             <input
@@ -1050,10 +1054,12 @@
                                 data-type="income"
                                 data-category="${cat}"
                                 value="${budgetData.income[cat] || ''}"
-                                class="budget-input w-full pl-8 pr-4 py-2 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-yellow-500"
+                                class="budget-input w-full pl-8 pr-4 py-2 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-yellow-500 ${isClanarineLocked ? 'bg-blue-50 cursor-not-allowed' : ''}"
                                 placeholder="0"
+                                ${isClanarineLocked ? 'disabled readonly title="Ovaj iznos se automatski izračunava iz taba Prihod po klubu"' : ''}
                             />
                         </div>
+                        ${isClanarineLocked ? '<p class="text-xs text-gray-500 mt-1">💡 Uređuje se u tabu "Prihod po klubu"</p>' : ''}
                     </div>
                 `;
             });
@@ -2682,6 +2688,7 @@
                 renderClubs();
                 renderPrihodiLog();
                 renderDashboard();
+                initBudgetInputs();  // Refresh budget inpute da prikaže novi iznos
                 alert(`✅ Članarine spremljene! (${savedCount} klubova)`);
             });
             
